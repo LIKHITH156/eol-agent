@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: eol-agent
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: FLASK_DEBUG
+        value: "false"
+      - key: CACHE_TTL_HOURS
+        value: "24"

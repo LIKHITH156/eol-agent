@@ -1,0 +1,1819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network EOL Intelligence Agent</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+/* ── Reset & base ──────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:        #f6f8fa;
+  --surface:   #ffffff;
+  --surface2:  #f0f2f5;
+  --border:    #d0d7de;
+  --border2:   #b0b7bf;
+  --text:      #1f2328;
+  --muted:     #656d76;
+  --accent:    #0969da;
+  --accent2:   #0550ae;
+  --red:       #cf222e;
+  --red-bg:    #ffebe9;
+  --amber:     #9a6700;
+  --amber-bg:  #fff8c5;
+  --yellow:    #7d4e00;
+  --yellow-bg: #fef3c7;
+  --green:     #1a7f37;
+  --green-bg:  #dafbe1;
+  --purple:    #0550ae;
+  --radius:    8px;
+  --radius-lg: 12px;
+
+}
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { cursor: pointer; font-family: inherit; }
+input, select { font-family: inherit; }
+
+/* ── Layout ────────────────────────────────────────────── */
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 220px;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 100;
+}
+.main { margin-left: 220px; min-height: 100vh; }
+.topbar {
+  height: 52px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 24px; gap: 12px;
+  position: sticky; top: 0; z-index: 50;
+}
+.content { padding: 24px; max-width: 1400px; }
+
+/* ── Sidebar ───────────────────────────────────────────── */
+.sidebar-logo {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.logo-icon {
+  width: 32px; height: 32px; background: linear-gradient(135deg, #1f6feb, #58a6ff);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font-size: 16px; margin-bottom: 8px;
+}
+.logo-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+.logo-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+.nav-section { padding: 8px 12px 4px; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 16px;
+  color: var(--muted); font-size: 13px; cursor: pointer;
+  border-left: 3px solid transparent; transition: all .15s;
+}
+.nav-item:hover { color: var(--text); background: var(--surface2); }
+.nav-item.active { color: var(--accent); background: rgba(31,111,235,.15); border-left-color: var(--accent); }
+.nav-item .icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+.nav-badge { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+.badge-red   { background: var(--red-bg);   color: var(--red); }
+.badge-amber { background: var(--amber-bg); color: var(--amber); }
+.badge-green { background: var(--green-bg); color: var(--green); }
+
+.sidebar-footer {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted);
+}
+.snow-status { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot-green  { background: var(--green); }
+.dot-red    { background: var(--red); }
+.dot-amber  { background: var(--amber); animation: blink 1.2s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── Topbar ────────────────────────────────────────────── */
+.topbar-title { font-size: 15px; font-weight: 600; }
+.topbar-sub   { font-size: 12px; color: var(--muted); margin-left: 4px; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* ── Buttons ───────────────────────────────────────────── */
+.btn {
+  padding: 6px 14px; font-size: 13px; border-radius: var(--radius);
+  border: 1px solid var(--border2); background: var(--surface2);
+  color: var(--text); transition: all .15s; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent2); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: #388bfd; }
+.btn-danger  { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+.btn-danger:hover { background: #5a1f1f; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Metric cards ──────────────────────────────────────── */
+.metrics { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+.metric-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+}
+.metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.metric-value { font-size: 28px; font-weight: 700; line-height: 1; }
+.metric-sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.m-total  .metric-value { color: var(--accent); }
+.m-exp    .metric-value { color: var(--red); }
+.m-crit   .metric-value { color: var(--red); }
+.m-warn   .metric-value { color: var(--amber); }
+.m-safe   .metric-value { color: var(--green); }
+
+/* ── Table ─────────────────────────────────────────────── */
+.table-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.table-header { padding: 14px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.table-title  { font-size: 14px; font-weight: 600; }
+.table-actions{ margin-left: auto; display: flex; gap: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th {
+  background: var(--surface2); color: var(--muted); font-weight: 600;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+  padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(0,0,0,.03); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.pill-expired { background: var(--red-bg);    color: var(--red); }
+.pill-critical{ background: var(--red-bg);    color: var(--red); }
+.pill-warning { background: var(--amber-bg);  color: var(--amber); }
+.pill-monitor { background: var(--yellow-bg); color: var(--yellow); }
+.pill-safe    { background: var(--green-bg);  color: var(--green); }
+.pill-unknown { background: var(--surface2);  color: var(--muted); }
+
+.repl-badge {
+  background: rgba(88,166,255,.12); color: var(--accent);
+  font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 500;
+}
+
+/* ── Search bar ────────────────────────────────────────── */
+.search-bar {
+  padding: 7px 12px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-size: 13px; width: 220px;
+  outline: none;
+}
+.search-bar:focus { border-color: var(--accent); }
+
+/* ── Panel switching ───────────────────────────────────── */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Charts ────────────────────────────────────────────── */
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.chart-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px;
+}
+.chart-card-title { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 14px; }
+.chart-wrap { position: relative; height: 220px; }
+
+/* ── Snow config form ──────────────────────────────────── */
+.config-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px;
+  max-width: 600px;
+}
+.config-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.config-sub   { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.form-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .4px; }
+.form-group input, .form-group select {
+  width: 100%; padding: 8px 10px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; outline: none;
+}
+.form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+
+/* ── Lookup panel ──────────────────────────────────────── */
+.lookup-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px;
+}
+.lookup-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.result-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px; margin-top: 14px;
+}
+.result-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+.result-field label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.result-field .val  { font-size: 14px; font-weight: 500; margin-top: 2px; }
+
+/* ── Log / progress ────────────────────────────────────── */
+.progress-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px;
+}
+.progress-bar-bg {
+  background: var(--surface2); border-radius: 4px; height: 8px; margin: 10px 0;
+}
+.progress-bar-fill {
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  height: 100%; border-radius: 4px; transition: width .3s ease;
+}
+.log-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px; color: var(--muted); max-height: 180px; overflow-y: auto;
+  line-height: 1.6;
+}
+
+/* ── Vendor portal list ────────────────────────────────── */
+.vendor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+.vendor-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.vendor-icon {
+  width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; font-size: 16px; flex-shrink: 0;
+}
+.vendor-name  { font-size: 13px; font-weight: 600; }
+.vendor-url   { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+.vendor-type  { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; background: var(--surface2); color: var(--muted); }
+
+/* ── Tabs ──────────────────────────────────────────────── */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab-btn {
+  padding: 9px 18px; font-size: 13px; background: none; border: none;
+  color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all .15s; white-space: nowrap;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Toast ─────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 999;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 16px; font-size: 13px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.5); transition: opacity .3s;
+  opacity: 0; pointer-events: none; max-width: 320px;
+}
+#toast.show { opacity: 1; pointer-events: all; }
+#toast.toast-ok   { border-color: var(--green); color: var(--green); }
+#toast.toast-err  { border-color: var(--red);   color: var(--red); }
+#toast.toast-info { border-color: var(--accent); color: var(--accent); }
+
+/* ── Empty state ───────────────────────────────────────── */
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+.empty-icon { font-size: 36px; margin-bottom: 12px; }
+.empty-text { font-size: 14px; }
+.empty-sub  { font-size: 12px; margin-top: 4px; }
+
+/* ── Upload dropzone ───────────────────────────────────── */
+.dropzone {
+  border: 2px dashed var(--border2); border-radius: var(--radius-lg);
+  padding: 36px 24px; text-align: center; cursor: pointer;
+  transition: all .2s; background: var(--surface2);
+}
+.dropzone:hover, .dropzone.drag-over {
+  border-color: var(--accent); background: rgba(9,105,218,.07);
+}
+.dropzone-icon  { font-size: 40px; margin-bottom: 10px; }
+.dropzone-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.dropzone-sub   { font-size: 12px; color: var(--muted); }
+.col-chip {
+  display: inline-block; padding: 2px 8px; margin: 2px; font-size: 11px;
+  border-radius: 12px; background: rgba(9,105,218,.12); color: var(--accent);
+  border: 1px solid rgba(9,105,218,.25);
+}
+.col-chip.missing { background: rgba(207,34,46,.08); color: var(--red); border-color: rgba(207,34,46,.25); }
+.upload-success {
+  background: var(--green-bg); border: 1px solid var(--green);
+  border-radius: var(--radius); padding: 12px 16px; font-size: 13px; color: var(--green);
+}
+.source-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600;
+}
+.source-excel { background: rgba(9,105,218,.12); color: var(--accent); }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .chart-grid { grid-template-columns: 1fr; }
+  .vendor-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Sidebar collapse ──────────────────────────────────────── */
+.sidebar { transition: transform .22s ease; }
+.sidebar.collapsed { transform: translateX(-220px); }
+.main { transition: margin-left .22s ease; }
+.main.sidebar-collapsed { margin-left: 0; }
+.sidebar-toggle { padding: 5px 10px; font-size: 16px; line-height: 1; margin-right: 2px; }
+
+/* ── Sortable columns ──────────────────────────────────────── */
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: var(--border); color: var(--text); }
+th.sort-asc::after  { content: ' \25B2'; font-size: 8px; opacity: .8; }
+th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
+
+/* ── Status filter chips ───────────────────────────────────── */
+.status-chips { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+.chip {
+  padding: 3px 11px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border2); background: var(--surface2); color: var(--muted);
+  cursor: pointer; transition: all .15s;
+}
+.chip:hover { background: var(--border); }
+.chip.chip-active-all  { background: var(--accent2); border-color: var(--accent); color: #fff; }
+.chip.chip-active-exp  { background: var(--red);     border-color: var(--red);    color: #fff; }
+.chip.chip-active-crit { background: var(--red);     border-color: var(--red);    color: #fff; }
+.chip.chip-active-warn { background: var(--amber);   border-color: var(--amber);  color: #fff; }
+.chip.chip-active-mon  { background: var(--yellow);  border-color: var(--yellow); color: #fff; }
+.chip.chip-active-safe { background: var(--green);   border-color: var(--green);  color: #fff; }
+.chip.chip-active-unk  { background: var(--muted);   border-color: var(--muted);  color: #fff; }
+
+/* ── Metric bars ───────────────────────────────────────────── */
+.metric-bar-bg   { height: 4px; background: var(--surface2); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+.metric-bar-fill { height: 100%; border-radius: 2px; transition: width .6s ease; min-width: 0; }
+.m-exp  .metric-bar-fill { background: var(--red); }
+.m-crit .metric-bar-fill { background: #ff7b72; }
+.m-warn .metric-bar-fill { background: var(--amber); }
+.m-safe .metric-bar-fill { background: var(--green); }
+
+/* ── Loading spinner ───────────────────────────────────────── */
+.btn-loading { opacity: .7; cursor: not-allowed; pointer-events: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin-icon { display: inline-block; animation: spin .7s linear infinite; }
+
+/* ── Progress percentage badge ─────────────────────────────── */
+.pct-badge {
+  font-size: 12px; font-weight: 700; color: var(--accent);
+  background: rgba(9,105,218,.1); border-radius: 4px; padding: 1px 6px; min-width: 40px; text-align: center;
+}
+
+/* ── 3-col chart grid ──────────────────────────────────────── */
+.chart-grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 20px; }
+@media (max-width: 1100px) { .chart-grid-3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px)  { .chart-grid-3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">📡
+      
+    </div>
+    <div class="logo-title">EOL Intelligence</div>
+    <div class="logo-sub">Network Lifecycle Agent</div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" onclick="showPanel('dashboard',this)">
+      <span class="icon">📊</span> Dashboard
+    </div>
+
+    <div class="nav-section">Analysis</div>
+    <div class="nav-item" onclick="showPanel('atrisk',this)">
+      <span class="icon">⚠️</span> At-Risk Devices
+      <span class="nav-badge badge-red" id="nb-risk">0</span>
+    </div>
+    <div class="nav-item" onclick="showPanel('safe',this)">
+      <span class="icon">✅</span> Safe Devices
+      <span class="nav-badge badge-green" id="nb-safe">0</span>
+    </div>
+    <div class="nav-item" onclick="showPanel('lookup',this)">
+      <span class="icon">🔍</span> Part Lookup
+    </div>
+
+    <div class="nav-section">Data Sources</div>
+    <div class="nav-item" onclick="showPanel('upload',this)" id="nav-upload">
+      <span class="icon">📤</span> Upload Excel
+      <span class="nav-badge badge-amber" id="nb-excel" style="display:none">0</span>
+    </div>
+    <div class="nav-item" onclick="showPanel('servicenow',this)">
+      <span class="icon">🔗</span> ServiceNow CMDB
+    </div>
+
+    <div class="nav-section">Configuration</div>
+    <div class="nav-item" onclick="showPanel('vendors',this)">
+      <span class="icon">🌐</span> Vendor Portals
+    </div>
+    <div class="nav-item" onclick="showPanel('scan',this)">
+      <span class="icon">⚙️</span> Run Scan
+    </div>
+    <div class="nav-item" onclick="showPanel('history',this);loadHistory()">
+      <span class="icon">🕐</span> Scan History
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="snow-status">
+      <div class="dot dot-red" id="snow-dot"></div>
+      <span id="snow-label">ServiceNow: Not connected</span>
+    </div>
+    <div class="snow-status" id="excel-status-row" style="display:none;margin-top:4px;">
+      <div class="dot dot-green"></div>
+      <span id="excel-label">Excel: 0 devices</span>
+    </div>
+    <div style="margin-top:4px;">v1.0 · 10 vendors · SQLite cache</div>
+  </div>
+</aside>
+
+<!-- ── MAIN ─────────────────────────────────────────────────── -->
+<div class="main">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <button class="btn btn-sm sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
+    <span class="topbar-title" id="topbar-title">Dashboard</span>
+    <span class="topbar-sub" id="topbar-sub"></span>
+    <div class="topbar-right">
+      <button class="btn btn-sm" onclick="loadDevices()">↻ Reload Devices</button>
+      <button class="btn btn-sm btn-primary" onclick="downloadReport()" id="btn-report" disabled>⬇ Export Excel</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ DASHBOARD ══════════════════════════════════════════ -->
+    <div id="panel-dashboard" class="panel active">
+      <div class="metrics">
+        <div class="metric-card m-total">
+          <div class="metric-label">Total Devices</div>
+          <div class="metric-value" id="m-total">—</div>
+          <div class="metric-sub">From CMDB</div>
+        </div>
+        <div class="metric-card m-exp">
+          <div class="metric-label">EOL / Expired</div>
+          <div class="metric-value" id="m-exp">—</div>
+          <div class="metric-sub" id="m-exp-sub">Past end-of-support</div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill" id="m-exp-bar" style="width:0%"></div></div>
+        </div>
+        <div class="metric-card m-crit">
+          <div class="metric-label">Critical &lt;6mo</div>
+          <div class="metric-value" id="m-crit">—</div>
+          <div class="metric-sub" id="m-crit-sub">Start procurement now</div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill" id="m-crit-bar" style="width:0%"></div></div>
+        </div>
+        <div class="metric-card m-warn">
+          <div class="metric-label">Warning 6–12mo</div>
+          <div class="metric-value" id="m-warn">—</div>
+          <div class="metric-sub" id="m-warn-sub">Plan replacement</div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill" id="m-warn-bar" style="width:0%"></div></div>
+        </div>
+        <div class="metric-card m-safe">
+          <div class="metric-label">Safe 2+ years</div>
+          <div class="metric-value" id="m-safe">—</div>
+          <div class="metric-sub" id="m-safe-sub">No action needed</div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill" id="m-safe-bar" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <div class="chart-grid-3">
+        <div class="chart-card">
+          <div class="chart-card-title">EOL Status Distribution</div>
+          <div class="chart-wrap"><canvas id="chart-donut"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">At-Risk by Vendor</div>
+          <div class="chart-wrap"><canvas id="chart-vendor"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">At-Risk by Company (Top 8)</div>
+          <div class="chart-wrap"><canvas id="chart-company"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Top at-risk table -->
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-title">⚠ Most Urgent — Top At-Risk Devices</span>
+          <div class="table-actions">
+            <button class="btn btn-sm" onclick="showPanel('atrisk',null)">View all →</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Device Name</th><th>Part Code</th><th>Vendor</th>
+            <th>End of Support</th><th>Days Left</th><th>Status</th><th>Replacement</th>
+          </tr></thead>
+          <tbody id="top-risk-tbody">
+            <tr><td colspan="7" class="empty"><div class="empty-icon">🔍</div><div class="empty-text">Run a scan to see results</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ AT-RISK ═════════════════════════════════════════════ -->
+    <div id="panel-atrisk" class="panel">
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-title">⚠ At-Risk Devices</span>
+          <input class="search-bar" placeholder="Search part code, vendor, model…" oninput="filterTable('risk-table',this.value)" style="margin-left:12px;">
+          <div class="table-actions">
+            <select id="risk-vendor-filter" class="search-bar" style="width:140px;" onchange="applyRiskFilters()">
+              <option value="">All Vendors</option>
+            </select>
+            <select id="risk-company-filter" class="search-bar" style="width:160px;" onchange="applyRiskFilters()">
+              <option value="">All Companies</option>
+            </select>
+            <button class="btn btn-sm btn-primary" id="btn-export-risk" onclick="downloadReport('risk-vendor-filter','risk-company-filter')">&#11015; Export</button>
+          </div>
+        </div>
+        <div class="status-chips" id="risk-status-chips">
+          <span style="font-size:11px;color:var(--muted);margin-right:2px;">Quick filter:</span>
+          <button class="chip chip-active-all" onclick="filterRiskByStatus('')">All</button>
+          <button class="chip" onclick="filterRiskByStatus('EXPIRED')">&#128308; Expired</button>
+          <button class="chip" onclick="filterRiskByStatus('CRITICAL')">&#128680; Critical</button>
+          <button class="chip" onclick="filterRiskByStatus('WARNING')">&#9888;&#65039; Warning</button>
+          <button class="chip" onclick="filterRiskByStatus('MONITOR')">&#128065; Monitor</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table id="risk-table">
+          <thead><tr>
+            <th class="sortable" onclick="sortTable('risk-table',0,'text')">Device Name</th>
+            <th>Part Code</th>
+            <th class="sortable" onclick="sortTable('risk-table',2,'text')">Vendor</th>
+            <th class="sortable" onclick="sortTable('risk-table',3,'text')">Company</th>
+            <th class="sortable" onclick="sortTable('risk-table',4,'text')">Country</th>
+            <th>Serial No.</th>
+            <th class="sortable" onclick="sortTable('risk-table',6,'text')">Model</th>
+            <th>IP Address</th><th>Location</th>
+            <th class="sortable" onclick="sortTable('risk-table',9,'text')">End of Sale</th>
+            <th class="sortable" onclick="sortTable('risk-table',10,'text')">End of Support</th>
+            <th class="sortable" onclick="sortTable('risk-table',11,'days')">Days Left</th>
+            <th class="sortable" onclick="sortTable('risk-table',12,'status')">Status</th>
+            <th>Replacement SKU</th><th>Source</th>
+          </tr></thead>
+          <tbody id="risk-tbody">
+            <tr><td colspan="15"><div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No results yet</div><div class="empty-sub">Run a scan from the "Run Scan" panel</div></div></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SAFE ════════════════════════════════════════════════ -->
+    <div id="panel-safe" class="panel">
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-title">✅ Safe Devices</span>
+          <input class="search-bar" placeholder="Search…" oninput="filterTable('safe-table',this.value)" style="margin-left:12px;">
+          <div class="table-actions">
+            <select id="safe-vendor-filter" class="search-bar" style="width:140px;" onchange="applySafeFilters()">
+              <option value="">All Vendors</option>
+            </select>
+            <select id="safe-company-filter" class="search-bar" style="width:160px;" onchange="applySafeFilters()">
+              <option value="">All Companies</option>
+            </select>
+            <button class="btn btn-sm btn-primary" id="btn-export-safe" onclick="downloadReport('safe-vendor-filter','safe-company-filter')">&#11015; Export</button>
+          </div>
+        </div>
+        <div class="status-chips" id="safe-status-chips">
+          <span style="font-size:11px;color:var(--muted);margin-right:2px;">Quick filter:</span>
+          <button class="chip chip-active-all" onclick="filterSafeByStatus('')">All</button>
+          <button class="chip" onclick="filterSafeByStatus('SAFE')">&#9989; Safe</button>
+          <button class="chip" onclick="filterSafeByStatus('MONITOR')">&#128065; Monitor</button>
+          <button class="chip" onclick="filterSafeByStatus('UNKNOWN')">&#10067; Not Announced</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table id="safe-table">
+          <thead><tr>
+            <th class="sortable" onclick="sortTable('safe-table',0,'text')">Device Name</th>
+            <th>Part Code</th>
+            <th class="sortable" onclick="sortTable('safe-table',2,'text')">Vendor</th>
+            <th class="sortable" onclick="sortTable('safe-table',3,'text')">Company</th>
+            <th class="sortable" onclick="sortTable('safe-table',4,'text')">Country</th>
+            <th>Serial No.</th>
+            <th class="sortable" onclick="sortTable('safe-table',6,'text')">Model</th>
+            <th>IP Address</th><th>Location</th>
+            <th class="sortable" onclick="sortTable('safe-table',9,'text')">End of Sale</th>
+            <th class="sortable" onclick="sortTable('safe-table',10,'text')">End of Support</th>
+            <th class="sortable" onclick="sortTable('safe-table',11,'days')">Days Left</th>
+            <th class="sortable" onclick="sortTable('safe-table',12,'status')">Status</th>
+          </tr></thead>
+          <tbody id="safe-tbody">
+            <tr><td colspan="13"><div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No results yet</div></div></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PART LOOKUP ═════════════════════════════════════════ -->
+    <div id="panel-lookup" class="panel">
+      <div class="lookup-card">
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">🔍 Live Part Code Lookup</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+          Fetches EOL/EOS data <strong>live</strong> from the vendor portal in real time.
+          No pre-cached data used.
+        </div>
+        <div class="lookup-row">
+          <div class="form-group">
+            <label>Part Code</label>
+            <input id="lookup-part" type="text" placeholder="e.g. WS-C2960X-24TS-L" style="width:260px;">
+          </div>
+          <div class="form-group">
+            <label>Vendor</label>
+            <select id="lookup-vendor" style="width:180px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+              <option value="">Auto-detect</option>
+              <option>Cisco</option><option>Juniper</option><option>HP Aruba</option>
+              <option>Arista</option><option>Dell</option><option>Fortinet</option>
+              <option>Palo Alto</option><option>Extreme Networks</option><option>Starlink</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="doLookup()" id="btn-lookup">
+            <span id="lookup-spinner"></span> Lookup Live ↗
+          </button>
+        </div>
+        <div id="lookup-result" style="display:none;" class="result-card">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:15px;font-weight:600;" id="lr-model"></span>
+            <span class="pill" id="lr-status-pill"></span>
+            <span style="font-size:11px;color:var(--muted);margin-left:auto;" id="lr-source"></span>
+          </div>
+          <div class="result-grid" id="lr-grid"></div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;" id="lr-links"></div>
+        </div>
+      </div>
+
+      <!-- Quick lookup chips -->
+      <div style="margin-top:4px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Quick lookup examples:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <script>
+            const quickParts = [
+              ["WS-C2960X-24TS-L","Cisco"],["ASA5506-K9","Cisco"],["FG-300E","Fortinet"],
+              ["PA-220","Palo Alto"],["EX2200-24T-4G","Juniper"],["J9772A","HP Aruba"],
+              ["DCS-7050CX3-32S","Arista"],["N3048","Dell"],["17101","Extreme Networks"],
+              ["STARLINK-DISH-GEN1","Starlink"],
+            ];
+            quickParts.forEach(([p,v]) => {
+              document.write(`<button class="btn btn-sm" onclick="quickLookup('${p}','${v}')">${p}</button>`);
+            });
+          </script>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ UPLOAD EXCEL ══════════════════════════════════════════ -->
+    <div id="panel-upload" class="panel">
+
+      <div class="config-card" style="max-width:720px;">
+        <div class="config-title">📤 Upload Device Inventory Excel</div>
+        <div class="config-sub">
+          Upload your asset spreadsheet. The agent reads the <strong>Model ID</strong> column to look up
+          EOL/EOS data for every device. All other columns (serial, IP, location, etc.) are preserved in results.
+        </div>
+
+        <!-- Dropzone -->
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('excel-file-input').click()"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="handleDrop(event)">
+          <input type="file" id="excel-file-input" accept=".xlsx,.xls" onchange="handleFileSelect(event)">
+          <div class="dropzone-icon" id="dz-icon">📂</div>
+          <div class="dropzone-title" id="dz-title">Click or drag &amp; drop your Excel file here</div>
+          <div class="dropzone-sub" id="dz-sub">.xlsx or .xls — any size</div>
+        </div>
+
+        <!-- Upload button + status -->
+        <div style="display:flex;gap:10px;align-items:center;margin-top:14px;" id="upload-btn-row" style="display:none;">
+          <button class="btn btn-primary" onclick="uploadExcel()" id="btn-upload" disabled>
+            <span id="upload-spinner"></span> Analyse This File
+          </button>
+          <span id="upload-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+
+        <!-- Success banner -->
+        <div id="upload-success-banner" style="display:none;margin-top:14px;" class="upload-success">
+          <strong id="upload-success-msg"></strong>
+          <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" onclick="showPanel('scan',null);preselectExcelSource()">
+              ▶ Run Scan on This Data
+            </button>
+            <button class="btn btn-sm" onclick="clearUpload()">✕ Clear / Upload Another</button>
+          </div>
+        </div>
+
+        <!-- Detected columns -->
+        <div id="detected-cols" style="display:none;margin-top:16px;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Detected columns:</div>
+          <div id="cols-chips"></div>
+        </div>
+      </div>
+
+      <!-- Preview table -->
+      <div class="table-wrap" id="upload-preview-wrap" style="display:none;max-width:920px;">
+        <div class="table-header">
+          <span class="table-title">Preview — first 5 rows</span>
+          <span style="font-size:12px;color:var(--muted);margin-left:12px;" id="preview-count-label"></span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="preview-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Model ID</th>
+              <th>Device Name</th>
+              <th>Vendor / Mfr</th>
+              <th>Serial</th>
+              <th>Mgmt IP</th>
+              <th>Location</th>
+              <th>Existing EOL Status</th>
+              <th>Existing EOS Date</th>
+              <th>IOS / FW Version</th>
+              <th>HW Status</th>
+            </tr></thead>
+            <tbody id="preview-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Column guide -->
+      <div class="config-card" style="max-width:720px;margin-top:0;">
+        <div class="config-title" style="margin-bottom:12px;">📋 Expected Column Format</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          The agent auto-detects these columns (case-insensitive). Only <strong>Model ID</strong> is required — all others are optional.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+          <div><span style="color:var(--red);font-weight:600;">*</span> <strong>Model ID</strong> — hardware part/model code (e.g. FG-60F, WS-C2960X)</div>
+          <div><strong>Asset</strong> — asset tag / alternate model code (fallback)</div>
+          <div><strong>Vendor / Manufacturer</strong> — vendor hint for lookup</div>
+          <div><strong>Serial number</strong> — device serial</div>
+          <div><strong>Name / Hostname</strong> — device display name</div>
+          <div><strong>Management IP Address</strong> — MGMT IP</div>
+          <div><strong>Company / Site Ref / City</strong> — shown as location</div>
+          <div><strong>Owner / H W Maintained by</strong> — owner field</div>
+          <div><strong>EOL Status</strong> — existing EOL value (displayed, not used for lookup)</div>
+          <div><strong>EOS Date</strong> — existing EOS date (displayed alongside our result)</div>
+          <div><strong>IOS Version</strong> — firmware / IOS version string</div>
+          <div><strong>Hardware Status / Operational status</strong> — device status</div>
+        </div>
+      </div>
+
+    </div><!-- /panel-upload -->
+
+    <!-- ══ SERVICENOW ══════════════════════════════════════════ -->
+    <div id="panel-servicenow" class="panel">
+      <div class="config-card">
+        <div class="config-title">🔗 ServiceNow CMDB Connection</div>
+        <div class="config-sub">
+          Connect to your ServiceNow instance to pull live device inventory.<br>
+          Credentials are used only for this session and never stored.
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Instance URL</label>
+            <input id="snow-url" type="text" placeholder="https://yourco.service-now.com">
+          </div>
+          <div class="form-group">
+            <label>Username</label>
+            <input id="snow-user" type="text" placeholder="api_user">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Password</label>
+            <input id="snow-pwd" type="password" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>CMDB Table</label>
+            <select id="snow-table">
+              <option value="cmdb_ci_netgear">cmdb_ci_netgear (Network gear)</option>
+              <option value="cmdb_ci_ip_switch">cmdb_ci_ip_switch (Switches)</option>
+              <option value="cmdb_ci_ip_router">cmdb_ci_ip_router (Routers)</option>
+              <option value="cmdb_ci_firewall">cmdb_ci_firewall (Firewalls)</option>
+              <option value="cmdb_ci_hardware">cmdb_ci_hardware (All hardware)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-primary" onclick="connectSnow()" id="btn-snow-connect">Test & Connect</button>
+          <span id="snow-conn-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+      </div>
+
+      <!-- Connection guide -->
+      <div class="config-card" style="max-width:700px;">
+        <div class="config-title" style="margin-bottom:12px;">📖 How ServiceNow Integration Works</div>
+        <div style="display:grid;gap:10px;">
+          <div style="display:flex;gap:10px;font-size:13px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">1</div>
+            <div><strong>File:</strong> <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">core/servicenow.py</code> — line 30–45 contains the connector class<br><span style="color:var(--muted);">Enter your instance URL, username, password above and click "Test & Connect"</span></div>
+          </div>
+          <div style="display:flex;gap:10px;font-size:13px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">2</div>
+            <div><strong>CMDB Table:</strong> The agent queries <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">cmdb_ci_netgear</code> for network devices<br><span style="color:var(--muted);">Fields pulled: name, model_id, model_number, serial_number, ip_address, location, manufacturer</span></div>
+          </div>
+          <div style="display:flex;gap:10px;font-size:13px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">3</div>
+            <div><strong>Part Code field:</strong> Agent uses <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">u_part_code</code> → <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">model_number</code> → <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">model_id</code> (priority order)<br><span style="color:var(--muted);">Add a custom field u_part_code to your CMDB table for best results</span></div>
+          </div>
+          <div style="display:flex;gap:10px;font-size:13px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">4</div>
+            <div><strong>Write-back:</strong> After analysis, results are written to <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">u_eol_status</code> and <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;">u_replacement_sku</code> on each CI<br><span style="color:var(--muted);">Requires these custom fields to exist on your CMDB table</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ VENDOR PORTALS ══════════════════════════════════════ -->
+    <div id="panel-vendors" class="panel">
+      <div style="margin-bottom:16px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">🌐 Vendor EOL Portal Sources</div>
+        <div style="font-size:12px;color:var(--muted);">
+          The agent fetches EOL data <strong>live</strong> from these official vendor portals.
+          No hardcoded dates — always fresh from the source.
+        </div>
+      </div>
+      <div class="vendor-grid" id="vendor-grid"></div>
+    </div>
+
+    <!-- ══ SCAN ════════════════════════════════════════════════ -->
+    <div id="panel-scan" class="panel">
+      <div class="config-card" style="max-width:600px;">
+        <div class="config-title">⚙️ Run EOL Analysis Scan</div>
+        <div class="config-sub">Configure and launch a full scan of your device inventory.</div>
+
+        <div id="scan-excel-banner" style="display:none;background:rgba(9,105,218,.07);border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;">
+          <span style="color:var(--accent);font-weight:600;">📤 Excel file loaded:</span>
+          <span id="scan-excel-info" style="color:var(--text);margin-left:6px;"></span>
+          <button class="btn btn-sm" style="margin-left:10px;" onclick="showPanel('upload',null)">Change file</button>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Device Source</label>
+            <select id="scan-source">
+              <option value="sample">Asset model inventory (700 built-in devices)</option>
+              <option value="excel" id="scan-src-excel" style="display:none">Uploaded Excel file</option>
+              <option value="snow">ServiceNow CMDB (requires connection)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>EOL Lookup Mode</label>
+            <select id="scan-mode">
+              <option value="db">Local DB only (fast, offline)</option>
+              <option value="live">Live vendor portals (real-time web)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--muted);margin-bottom:14px;">
+          <strong style="color:var(--green);">Local DB mode</strong> (fast): Master DB (478 records) → Curated DB (120+ records) → <strong>SQLite cache</strong> (24h TTL for web results).<br><br>
+          <strong style="color:var(--amber);">Live mode</strong> adds: <strong>endoflife.date API</strong> (free, authoritative for Cisco Meraki) + vendor portal scraping with retry &amp; date validation.<br>
+          Parallel processing: up to 15 threads (local) / 4 threads (live). Results persist across restarts.
+        </div>
+
+        <button class="btn btn-primary" onclick="startScan()" id="btn-scan">▶ Start Scan</button>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progress-wrap" style="display:none;max-width:600px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span style="font-size:13px;font-weight:600;">Scan Progress</span>
+          <span style="font-size:12px;color:var(--muted);" id="progress-count">0 / 0</span>
+          <span class="pct-badge" id="progress-pct">0%</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
+        <div class="log-box" id="log-box"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;" id="scan-done-row" style="display:none;">
+          <span style="font-size:13px;color:var(--green);font-weight:600;">✓ Scan complete</span>
+          <button class="btn btn-sm btn-primary" onclick="showPanel('dashboard',null)">View Dashboard →</button>
+          <button class="btn btn-sm" onclick="downloadReport()">⬇ Download Report</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SCAN HISTORY ══════════════════════════════════════════ -->
+    <div id="panel-history" class="panel">
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-title">🕐 Scan History</span>
+          <div class="table-actions">
+            <button class="btn btn-sm" onclick="loadHistory()">↻ Refresh</button>
+          </div>
+        </div>
+        <table id="history-table">
+          <thead><tr>
+            <th>#</th><th>Run At</th><th>Source</th><th>Devices</th>
+            <th style="color:var(--red)">Expired</th>
+            <th style="color:var(--red)">Critical</th>
+            <th style="color:var(--amber)">Warning</th>
+            <th style="color:var(--amber)">Monitor</th>
+            <th style="color:var(--green)">Safe</th>
+            <th>Not Announced</th>
+          </tr></thead>
+          <tbody id="history-tbody">
+            <tr><td colspan="10"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div><div class="empty-sub">Run a scan to start tracking history</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────── //
+const API = '';  // same origin
+let _scanInterval     = null;
+let _sseSource        = null;
+let _charts           = {};
+let _allResults       = { at_risk: [], safe: [] };
+let _excelLoaded      = false;
+let _excelFile        = null;
+let _riskStatusFilter = '';
+let _safeStatusFilter = '';
+const _sortState      = {};
+
+// ── Panel switching ──────────────────────────────────────────── //
+function showPanel(id, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  const titles = {
+    dashboard:'Dashboard', atrisk:'At-Risk Devices', safe:'Safe Devices',
+    lookup:'Part Code Lookup', upload:'Upload Excel Inventory',
+    servicenow:'ServiceNow CMDB', vendors:'Vendor Portals',
+    scan:'Run Scan', history:'Scan History',
+  };
+  document.getElementById('topbar-title').textContent = titles[id] || id;
+  document.getElementById('topbar-sub').textContent = '';
+}
+
+// ── Toast ────────────────────────────────────────────────────── //
+function toast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show toast-${type}`;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = ''; }, 3500);
+}
+
+// ── API calls ────────────────────────────────────────────────── //
+async function apiFetch(path, opts={}) {
+  const r = await fetch(API + path, {
+    headers: {'Content-Type':'application/json'},
+    ...opts,
+  });
+  return r.json();
+}
+
+// ── Load devices ─────────────────────────────────────────────── //
+async function loadDevices() {
+  toast('Loading device inventory…', 'info');
+  const d = await apiFetch('/api/devices');
+  toast(`Loaded ${d.count} devices from ${d.source}`, 'ok');
+}
+
+
+// ── ServiceNow connect ───────────────────────────────────────── //
+async function connectSnow() {
+  const url   = document.getElementById('snow-url').value.trim();
+  const user  = document.getElementById('snow-user').value.trim();
+  const pwd   = document.getElementById('snow-pwd').value.trim();
+  const table = document.getElementById('snow-table').value;
+  const status = document.getElementById('snow-conn-status');
+
+  if (!url || !user || !pwd) { toast('Fill in all ServiceNow fields', 'err'); return; }
+  status.textContent = 'Connecting…';
+  status.style.color = 'var(--amber)';
+
+  const r = await apiFetch('/api/connect/servicenow', {
+    method: 'POST',
+    body: JSON.stringify({url, username:user, password:pwd, table}),
+  });
+
+  if (r.status === 'ok') {
+    localStorage.setItem('snow_url', url);  // persist URL (never password)
+    document.getElementById('snow-dot').className = 'dot dot-green';
+    document.getElementById('snow-label').textContent = 'ServiceNow: Connected';
+    status.textContent = '✓ ' + r.message;
+    status.style.color = 'var(--green)';
+    toast('ServiceNow connected!', 'ok');
+  } else {
+    status.textContent = '✗ ' + r.message;
+    status.style.color = 'var(--red)';
+    toast('Connection failed: ' + r.message, 'err');
+  }
+}
+
+// ── Excel Upload ─────────────────────────────────────────────── //
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) _stageFile(file);
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  document.getElementById('dropzone').classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (file) _stageFile(file);
+}
+
+function _stageFile(file) {
+  if (!file.name.match(/\.(xlsx|xls)$/i)) {
+    toast('Only .xlsx / .xls files are supported', 'err');
+    return;
+  }
+  _excelFile = file;
+  document.getElementById('dz-icon').textContent  = '📊';
+  document.getElementById('dz-title').textContent = file.name;
+  document.getElementById('dz-sub').textContent   =
+    `${(file.size / 1024).toFixed(1)} KB  —  click to change`;
+  document.getElementById('upload-btn-row').style.display = 'flex';
+  document.getElementById('btn-upload').disabled = false;
+  document.getElementById('upload-success-banner').style.display = 'none';
+  document.getElementById('detected-cols').style.display = 'none';
+  document.getElementById('upload-preview-wrap').style.display = 'none';
+  document.getElementById('upload-status').textContent = '';
+}
+
+async function uploadExcel() {
+  if (!_excelFile) { toast('Select a file first', 'err'); return; }
+
+  const btn = document.getElementById('btn-upload');
+  const statusEl = document.getElementById('upload-status');
+  btn.disabled = true;
+  document.getElementById('upload-spinner').textContent = '⟳ ';
+  statusEl.textContent = 'Uploading…';
+  statusEl.style.color = 'var(--amber)';
+
+  const formData = new FormData();
+  formData.append('file', _excelFile);
+
+  try {
+    const resp = await fetch(API + '/api/upload/excel', {
+      method: 'POST',
+      body: formData,
+    });
+    const r = await resp.json();
+
+    if (r.status !== 'ok') {
+      statusEl.textContent = 'Error: ' + r.message;
+      statusEl.style.color = 'var(--red)';
+      toast(r.message, 'err');
+      return;
+    }
+
+    // Success
+    _excelLoaded = true;
+    statusEl.textContent = '';
+
+    // Update success banner
+    document.getElementById('upload-success-banner').style.display = 'block';
+    document.getElementById('upload-success-msg').textContent =
+      `Loaded ${r.count} devices from "${r.filename}" (${r.skipped} rows skipped)`;
+
+    // Update sidebar
+    document.getElementById('excel-status-row').style.display = 'flex';
+    document.getElementById('excel-label').textContent = `Excel: ${r.count} devices`;
+    document.getElementById('nb-excel').textContent = r.count;
+    document.getElementById('nb-excel').style.display = '';
+
+    // Update scan source dropdown
+    const excelOpt = document.getElementById('scan-src-excel');
+    excelOpt.textContent = `Uploaded Excel — ${r.count} devices (${_excelFile.name})`;
+    excelOpt.style.display = '';
+    document.getElementById('scan-source').value = 'excel';
+
+    // Show scan banner in Run Scan panel
+    document.getElementById('scan-excel-banner').style.display = 'block';
+    document.getElementById('scan-excel-info').textContent =
+      `${_excelFile.name} — ${r.count} devices ready`;
+
+    // Render detected columns chips
+    _renderColChips(r.detected_columns);
+
+    // Render preview table
+    if (r.preview && r.preview.length) _renderPreview(r.preview, r.count);
+
+    toast(`Loaded ${r.count} devices from Excel`, 'ok');
+
+  } catch(err) {
+    statusEl.textContent = 'Upload failed: ' + err.message;
+    statusEl.style.color = 'var(--red)';
+    toast('Upload failed: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('upload-spinner').textContent = '';
+  }
+}
+
+function _renderColChips(detected) {
+  const required = ['model_id'];
+  const important = ['vendor','serial','name','hostname','ip','location','company','existing_eol','existing_eos'];
+  const all = ['model_id','asset','vendor','serial','name','hostname','ip',
+               'location','city','country','company','owner',
+               'hw_status','op_status','existing_eol','existing_eos','ios_version','contract'];
+
+  const labels = {
+    model_id:'Model ID', asset:'Asset', vendor:'Vendor/Mfr', serial:'Serial Number',
+    name:'Name', hostname:'Hostname', ip:'Mgmt IP', location:'Site Ref',
+    city:'City', country:'Country', company:'Company', owner:'Owner',
+    hw_status:'HW Status', op_status:'Op Status', existing_eol:'EOL Status',
+    existing_eos:'EOS Date', ios_version:'IOS Version', contract:'Contract',
+  };
+
+  const wrap = document.getElementById('cols-chips');
+  wrap.innerHTML = all.map(k => {
+    const found = !!detected[k];
+    const label = labels[k] || k;
+    const mapped = detected[k] ? ` → "${detected[k]}"` : '';
+    return `<span class="col-chip ${found ? '' : 'missing'}" title="${found ? 'Mapped to column: '+detected[k] : 'Not found in file'}">
+      ${found ? '' : '✗ '}${label}${mapped}
+    </span>`;
+  }).join('');
+  document.getElementById('detected-cols').style.display = 'block';
+}
+
+function _renderPreview(rows, total) {
+  const tbody = document.getElementById('preview-tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="color:var(--muted);font-size:11px">${r.row}</td>
+      <td><code style="font-size:11px;color:var(--accent)">${r.model_id||'—'}</code></td>
+      <td style="font-size:12px">${r.name||'—'}</td>
+      <td style="font-size:12px">${r.vendor||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.serial||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.ip||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.location||'—'}</td>
+      <td style="font-size:11px">${r.existing_eol ? `<span class="pill pill-${_eolStatusClass(r.existing_eol)}">${r.existing_eol}</span>` : '—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.existing_eos||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.ios_version||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.hw_status||'—'}</td>
+    </tr>`).join('');
+
+  document.getElementById('preview-count-label').textContent =
+    `Showing 5 of ${total} devices`;
+  document.getElementById('upload-preview-wrap').style.display = 'block';
+}
+
+function _eolStatusClass(status) {
+  const s = (status||'').toLowerCase();
+  if (s.includes('expired') || s.includes('eol'))  return 'expired';
+  if (s.includes('critical'))                       return 'critical';
+  if (s.includes('warning'))                        return 'warning';
+  if (s.includes('monitor'))                        return 'monitor';
+  if (s.includes('safe'))                           return 'safe';
+  return 'unknown';
+}
+
+function clearUpload() {
+  _excelFile   = null;
+  _excelLoaded = false;
+  document.getElementById('excel-file-input').value = '';
+  document.getElementById('dz-icon').textContent  = '📂';
+  document.getElementById('dz-title').textContent = 'Click or drag & drop your Excel file here';
+  document.getElementById('dz-sub').textContent   = '.xlsx or .xls — any size';
+  document.getElementById('upload-btn-row').style.display   = 'none';
+  document.getElementById('upload-success-banner').style.display = 'none';
+  document.getElementById('detected-cols').style.display    = 'none';
+  document.getElementById('upload-preview-wrap').style.display = 'none';
+  document.getElementById('nb-excel').style.display    = 'none';
+  document.getElementById('excel-status-row').style.display = 'none';
+  document.getElementById('scan-src-excel').style.display   = 'none';
+  document.getElementById('scan-excel-banner').style.display = 'none';
+  // Switch scan source back to sample
+  const sel = document.getElementById('scan-source');
+  if (sel.value === 'excel') sel.value = 'sample';
+}
+
+function preselectExcelSource() {
+  if (_excelLoaded) document.getElementById('scan-source').value = 'excel';
+}
+
+// ── Part lookup ──────────────────────────────────────────────── //
+function quickLookup(part, vendor) {
+  document.getElementById('lookup-part').value = part;
+  document.getElementById('lookup-vendor').value = vendor;
+  showPanel('lookup', null);
+  doLookup();
+}
+
+async function doLookup() {
+  const part   = document.getElementById('lookup-part').value.trim();
+  const vendor = document.getElementById('lookup-vendor').value;
+  if (!part) { toast('Enter a part code', 'err'); return; }
+
+  const btn = document.getElementById('btn-lookup');
+  btn.disabled = true;
+  document.getElementById('lookup-spinner').textContent = '⟳ ';
+  document.getElementById('lookup-result').style.display = 'none';
+
+  try {
+    const r = await apiFetch('/api/lookup', {
+      method: 'POST',
+      body: JSON.stringify({part_code: part, vendor}),
+    });
+
+    if (r.status === 'not_found') {
+      toast('No EOL data found for ' + part, 'err');
+      return;
+    }
+
+    const e = r.eol;
+    const status_info = getStatusInfo(e);
+
+    document.getElementById('lr-model').textContent = e.model || part;
+    const pill = document.getElementById('lr-status-pill');
+    pill.textContent = status_info.label;
+    pill.className = 'pill ' + status_info.cls;
+    document.getElementById('lr-source').textContent =
+      `Source: ${r.source} · ${r.vendor}`;
+
+    document.getElementById('lr-grid').innerHTML = `
+      <div class="result-field"><label>End of Sale</label><div class="val">${fmtDate(e.end_of_sale) || '—'}</div></div>
+      <div class="result-field"><label>End of Support</label><div class="val" style="color:${e.end_of_support ? statusColor(e.end_of_support) : 'inherit'}">${fmtDate(e.end_of_support) || '—'}</div></div>
+      <div class="result-field"><label>SW Maint. End</label><div class="val">${fmtDate(e.end_of_sw_maint) || '—'}</div></div>
+      <div class="result-field"><label>Replacement SKU</label><div class="val">${e.replacement_sku ? `<span class="repl-badge">${e.replacement_sku}</span>` : '—'}</div></div>
+      <div class="result-field"><label>Replacement Name</label><div class="val">${e.replacement_name || '—'}</div></div>
+      <div class="result-field"><label>Confidence</label><div class="val">${e.confidence || '—'}</div></div>
+    `;
+
+    const links = [];
+    if (e.source_url && e.source_url !== 'None')
+      links.push(`<a href="${e.source_url}" target="_blank" class="btn btn-sm">🔗 Source Page</a>`);
+    if (e.migration_url && e.migration_url !== 'None')
+      links.push(`<a href="${e.migration_url}" target="_blank" class="btn btn-sm">📋 Migration Guide</a>`);
+    document.getElementById('lr-links').innerHTML = links.join('');
+    document.getElementById('lookup-result').style.display = 'block';
+    toast('EOL data fetched from ' + r.source, 'ok');
+  } catch(err) {
+    toast('Lookup failed: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('lookup-spinner').textContent = '';
+  }
+}
+
+// ── Scan ─────────────────────────────────────────────────────── //
+async function startScan() {
+  const source   = document.getElementById('scan-source').value;
+  const modeVal  = document.getElementById('scan-mode').value;
+  const use_live = modeVal === 'live';
+
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('scan-done-row').style.display = 'none';
+  document.getElementById('btn-scan').disabled = true;
+  document.getElementById('log-box').textContent = '';
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-count').textContent = '0 / ?';
+  document.getElementById('progress-pct').textContent = '0%';
+
+  const r = await apiFetch('/api/analyse', {
+    method: 'POST',
+    body: JSON.stringify({source, use_live}),
+  });
+
+  if (r.status === 'already_running') { toast('Scan already running', 'err'); document.getElementById('btn-scan').disabled = false; return; }
+  if (r.status !== 'started') { toast('Failed to start scan: ' + (r.message||''), 'err'); document.getElementById('btn-scan').disabled = false; return; }
+
+  toast(`Scan started — ${r.total} devices (parallel)`, 'info');
+  _connectSSE();
+}
+
+function _connectSSE() {
+  if (_sseSource) { _sseSource.close(); _sseSource = null; }
+  if (!window.EventSource) { _scanInterval = setInterval(_pollScan, 1200); return; }
+
+  _sseSource = new EventSource(API + '/api/analyse/stream');
+
+  _sseSource.onmessage = function(event) {
+    const s = JSON.parse(event.data);
+    _updateProgress(s);
+    if (s.done && !s.running) {
+      _sseSource.close(); _sseSource = null;
+      _onScanDone(s);
+    }
+  };
+
+  _sseSource.onerror = function() {
+    _sseSource.close(); _sseSource = null;
+    // Fallback to polling if SSE fails
+    if (!_scanInterval) _scanInterval = setInterval(_pollScan, 1500);
+  };
+}
+
+function _updateProgress(s) {
+  const pct = s.total > 0 ? Math.round(s.processed / s.total * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-count').textContent = `${s.processed} / ${s.total}`;
+  document.getElementById('progress-pct').textContent = pct + '%';
+  if (s.log && s.log.length) {
+    const logBox = document.getElementById('log-box');
+    logBox.textContent = s.log.join('\n');
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+}
+
+function _onScanDone(s) {
+  clearInterval(_scanInterval); _scanInterval = null;
+  document.getElementById('btn-scan').disabled = false;
+  document.getElementById('scan-done-row').style.display = 'flex';
+  document.getElementById('btn-report').disabled = false;
+  toast(`Scan complete — ${s.stats.total} devices analysed`, 'ok');
+
+  const at_risk = s.at_risk || [];
+  const safe    = s.safe    || [];
+  _allResults = {at_risk, safe};
+  renderDashboard(s.stats, at_risk, safe);
+  renderRiskTable(at_risk);
+  renderSafeTable(safe);
+  document.getElementById('nb-risk').textContent = at_risk.length;
+  document.getElementById('nb-safe').textContent = safe.length;
+}
+
+async function _pollScan() {
+  const s = await apiFetch('/api/analyse/status');
+  _updateProgress(s);
+  if (s.done || !s.running) {
+    clearInterval(_scanInterval); _scanInterval = null;
+    _onScanDone(s);
+  }
+}
+
+// ── Scan history ──────────────────────────────────────────────── //
+async function loadHistory() {
+  const data = await apiFetch('/api/scans/history?limit=25');
+  const tbody = document.getElementById('history-tbody');
+  if (!data.scans || !data.scans.length) {
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.scans.map((s, idx) => `
+    <tr>
+      <td style="color:var(--muted);font-size:11px">${data.scans.length - idx}</td>
+      <td style="white-space:nowrap">${new Date(s.run_at).toLocaleString()}</td>
+      <td><span class="pill ${s.source==='snow'?'pill-monitor':'pill-safe'}">${s.source}</span></td>
+      <td style="font-weight:600">${s.device_count}</td>
+      <td style="color:var(--red);font-weight:600">${s.stats.expired||0}</td>
+      <td style="color:var(--red);font-weight:600">${s.stats.critical||0}</td>
+      <td style="color:var(--amber);font-weight:600">${s.stats.warning||0}</td>
+      <td style="color:var(--amber)">${s.stats.monitor||0}</td>
+      <td style="color:var(--green);font-weight:600">${s.stats.safe||0}</td>
+      <td style="color:var(--muted)">${s.stats.unknown||0}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Render dashboard ─────────────────────────────────────────── //
+function renderDashboard(stats, at_risk, safe) {
+  document.getElementById('m-total').textContent = stats.total;
+  document.getElementById('m-exp').textContent   = stats.expired;
+  document.getElementById('m-crit').textContent  = stats.critical;
+  document.getElementById('m-warn').textContent  = stats.warning;
+  document.getElementById('m-safe').textContent  = stats.safe;
+
+  const total = stats.total || 1;
+  const barData = [
+    ['exp',  stats.expired],
+    ['crit', stats.critical],
+    ['warn', stats.warning],
+    ['safe', stats.safe],
+  ];
+  barData.forEach(([key, count]) => {
+    const pct = Math.min(100, Math.round(count / total * 100));
+    const bar = document.getElementById(`m-${key}-bar`);
+    if (bar) bar.style.width = pct + '%';
+    const sub = document.getElementById(`m-${key}-sub`);
+    if (sub && total > 1) sub.textContent = `${pct}% of total`;
+  });
+
+  renderDonut(stats);
+  renderVendorBar(at_risk);
+  renderCompanyBar(at_risk);
+  renderTopRisk(at_risk.slice(0, 8));
+}
+
+function renderDonut(stats) {
+  const ctx = document.getElementById('chart-donut').getContext('2d');
+  if (_charts.donut) _charts.donut.destroy();
+  _charts.donut = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Expired','Critical','Warning','Monitor','Safe','Not Announced'],
+      datasets: [{
+        data: [stats.expired, stats.critical, stats.warning, stats.monitor, stats.safe, stats.unknown],
+        backgroundColor: ['#f85149','#ff7b72','#e3b341','#d29922','#3fb950','#484f58'],
+        borderColor: '#161b22', borderWidth: 3, hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: { legend: { display: false } },
+    }
+  });
+}
+
+function renderVendorBar(at_risk) {
+  const vendorCounts = {};
+  at_risk.forEach(r => {
+    const v = r.device.vendor;
+    vendorCounts[v] = (vendorCounts[v] || 0) + 1;
+  });
+  const sorted = Object.entries(vendorCounts).sort((a,b) => b[1]-a[1]);
+  const ctx = document.getElementById('chart-vendor').getContext('2d');
+  if (_charts.vendor) _charts.vendor.destroy();
+  _charts.vendor = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(x=>x[0]),
+      datasets: [{
+        data: sorted.map(x=>x[1]),
+        backgroundColor: '#f85149', borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+        y: { grid: { display: false },   ticks: { color: '#8b949e' } },
+      }
+    }
+  });
+}
+
+function renderCompanyBar(at_risk) {
+  const counts = {};
+  at_risk.forEach(r => {
+    const c = _company(r.device.location) || 'Unknown';
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  const ctx = document.getElementById('chart-company')?.getContext('2d');
+  if (!ctx) return;
+  if (_charts.company) _charts.company.destroy();
+  _charts.company = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(x => x[0]),
+      datasets: [{ data: sorted.map(x => x[1]), backgroundColor: '#e3b341', borderRadius: 4, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#e5e7eb' }, ticks: { color: '#8b949e' } },
+        y: { grid: { display: false },   ticks: { color: '#4b5563', font: { size: 11 } } },
+      }
+    }
+  });
+}
+
+function renderTopRisk(items) {
+  const tbody = document.getElementById('top-risk-tbody');
+  if (!items.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty"><div class="empty-icon">✅</div><div class="empty-text">No at-risk devices found</div></div></td></tr>'; return; }
+  tbody.innerHTML = items.map(r => `
+    <tr>
+      <td>${r.device.name}</td>
+      <td><code style="font-size:11px;color:var(--accent)">${r.device.part_code}</code></td>
+      <td>${r.device.vendor}</td>
+      <td>${fmtDate(r.eol?.end_of_support) || '—'}</td>
+      <td style="color:${r.days_left < 0 ? 'var(--red)' : r.days_left < 365 ? 'var(--amber)' : 'inherit'};font-weight:600;">
+        ${r.days_left != null ? (r.days_left < 0 ? Math.abs(r.days_left)+'d overdue' : r.days_left+'d') : '—'}
+      </td>
+      <td>${statusPill(r.status_key)}</td>
+      <td>${r.eol?.replacement_sku ? `<span class="repl-badge">${r.eol.replacement_sku}</span>` : '—'}</td>
+    </tr>`).join('');
+}
+
+function _company(location) {
+  if (!location) return '';
+  return location.split(' | ')[0].trim();
+}
+function _country(location) {
+  if (!location) return '';
+  const parts = location.split(' | ');
+  return parts.length > 1 ? parts[parts.length - 1].trim() : '';
+}
+
+function _populateFilter(selId, values, allLabel) {
+  const sel = document.getElementById(selId);
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">${allLabel}</option>` +
+    [...values].sort().map(v => `<option${v===prev?' selected':''}>${v}</option>`).join('');
+}
+
+function renderRiskTable(items) {
+  _populateFilter('risk-vendor-filter',  new Set(items.map(r => r.device.vendor).filter(Boolean)), 'All Vendors');
+  _populateFilter('risk-company-filter', new Set(items.map(r => _company(r.device.location)).filter(Boolean)), 'All Companies');
+
+  const tbody = document.getElementById('risk-tbody');
+  if (!items.length) { tbody.innerHTML = '<tr><td colspan="15"><div class="empty"><div class="empty-icon">✅</div><div class="empty-text">No at-risk devices</div></div></td></tr>'; return; }
+  tbody.innerHTML = items.map(r => `
+    <tr data-vendor="${r.device.vendor}" data-company="${_company(r.device.location)}" data-status="${r.status_key}">
+      <td>${r.device.name}</td>
+      <td><code style="font-size:11px;color:var(--accent)">${r.device.part_code}</code></td>
+      <td>${r.device.vendor}</td>
+      <td style="font-size:11px">${_company(r.device.location) || '—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${_country(r.device.location) || '—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.device.serial || '—'}</td>
+      <td style="color:var(--muted)">${r.device.model}</td>
+      <td style="color:var(--muted);font-size:11px">${r.device.ip_address || '—'}</td>
+      <td style="color:var(--muted);font-size:11px">${r.device.location || '—'}</td>
+      <td>${fmtDate(r.eol?.end_of_sale) || '—'}</td>
+      <td>${fmtDate(r.eol?.end_of_support) || '—'}</td>
+      <td style="color:${r.days_left < 0 ? 'var(--red)' : 'var(--amber)'};font-weight:600;">
+        ${r.days_left != null ? (r.days_left < 0 ? Math.abs(r.days_left)+'d overdue' : r.days_left+'d') : '—'}
+      </td>
+      <td>${statusPill(r.status_key)}</td>
+      <td>${r.eol?.replacement_sku ? `<span class="repl-badge">${r.eol.replacement_sku}</span>` : '—'}</td>
+      <td>${r.eol?.source_url ? `<a href="${r.eol.source_url}" target="_blank" style="font-size:11px;">&#128279; Source</a>` : '—'}</td>
+    </tr>`).join('');
+}
+
+function renderSafeTable(items) {
+  _populateFilter('safe-vendor-filter',  new Set(items.map(r => r.device.vendor).filter(Boolean)), 'All Vendors');
+  _populateFilter('safe-company-filter', new Set(items.map(r => _company(r.device.location)).filter(Boolean)), 'All Companies');
+
+  const tbody = document.getElementById('safe-tbody');
+  if (!items.length) { tbody.innerHTML = '<tr><td colspan="13"><div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No results</div></div></td></tr>'; return; }
+  tbody.innerHTML = items.map(r => `
+    <tr data-vendor="${r.device.vendor}" data-company="${_company(r.device.location)}" data-status="${r.status_key}">
+      <td>${r.device.name}</td>
+      <td><code style="font-size:11px;color:var(--green)">${r.device.part_code}</code></td>
+      <td>${r.device.vendor}</td>
+      <td style="font-size:11px">${_company(r.device.location) || '—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${_country(r.device.location) || '—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${r.device.serial || '—'}</td>
+      <td style="color:var(--muted)">${r.device.model}</td>
+      <td style="color:var(--muted);font-size:11px">${r.device.ip_address || '—'}</td>
+      <td style="color:var(--muted);font-size:11px">${r.device.location || '—'}</td>
+      <td>${fmtDate(r.eol?.end_of_sale) || '—'}</td>
+      <td>${fmtDate(r.eol?.end_of_support) || '—'}</td>
+      <td style="color:var(--green);font-weight:600">${r.days_left != null ? r.days_left+'d' : '—'}</td>
+      <td>${statusPill(r.status_key)}</td>
+    </tr>`).join('');
+}
+
+// ── Vendor portals ────────────────────────────────────────────── //
+async function loadVendors() {
+  const data = await apiFetch('/api/vendors');
+  const icons = {
+    'Cisco':'🔵','Juniper':'🟠','HP Aruba':'🟢','Arista':'🔴',
+    'Dell':'🔷','Fortinet':'🟤','Palo Alto':'🟡','Extreme Networks':'🟣','Starlink':'⭐'
+  };
+  const typeColors = {'REST API':'var(--accent)','JSON + HTML':'var(--green)','HTML Table':'var(--amber)','Web Scrape':'var(--muted)'};
+  document.getElementById('vendor-grid').innerHTML = data.vendors.map(v => `
+    <div class="vendor-card">
+      <div class="vendor-icon" style="background:var(--surface2)">${icons[v.name]||'📡'}</div>
+      <div>
+        <div class="vendor-name">${v.name}</div>
+        <div class="vendor-url">${v.portal}</div>
+        <span class="vendor-type" style="color:${typeColors[v.type]||'var(--muted)'};">${v.type}</span>
+      </div>
+    </div>`).join('');
+}
+
+// ── Filter helpers ────────────────────────────────────────────── //
+function filterTable(tableId, q) {
+  document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
+    tr.style.display = tr.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+
+function applyRiskFilters() {
+  const vendor  = document.getElementById('risk-vendor-filter').value;
+  const company = document.getElementById('risk-company-filter').value;
+  document.querySelectorAll('#risk-table tbody tr').forEach(tr => {
+    const vMatch = !vendor            || tr.dataset.vendor  === vendor;
+    const cMatch = !company           || tr.dataset.company === company;
+    const sMatch = !_riskStatusFilter || tr.dataset.status  === _riskStatusFilter;
+    tr.style.display = vMatch && cMatch && sMatch ? '' : 'none';
+  });
+}
+
+function applySafeFilters() {
+  const vendor  = document.getElementById('safe-vendor-filter').value;
+  const company = document.getElementById('safe-company-filter').value;
+  document.querySelectorAll('#safe-table tbody tr').forEach(tr => {
+    const vMatch = !vendor            || tr.dataset.vendor  === vendor;
+    const cMatch = !company           || tr.dataset.company === company;
+    const sMatch = !_safeStatusFilter || tr.dataset.status  === _safeStatusFilter;
+    tr.style.display = vMatch && cMatch && sMatch ? '' : 'none';
+  });
+}
+
+function filterRiskByStatus(status) {
+  _riskStatusFilter = status;
+  const chipMap = { '': 'chip-active-all', EXPIRED: 'chip-active-exp', CRITICAL: 'chip-active-crit', WARNING: 'chip-active-warn', MONITOR: 'chip-active-mon' };
+  document.querySelectorAll('#risk-status-chips .chip').forEach(c => {
+    c.className = 'chip';
+    const match = Object.entries(chipMap).find(([k]) => k === status);
+    const btnStatus = c.getAttribute('onclick')?.match(/'([^']*)'/) ?.[1] ?? '';
+    if (btnStatus === status) c.classList.add(chipMap[status] || 'chip-active-all');
+  });
+  applyRiskFilters();
+}
+
+function filterSafeByStatus(status) {
+  _safeStatusFilter = status;
+  const chipMap = { '': 'chip-active-all', SAFE: 'chip-active-safe', MONITOR: 'chip-active-mon', UNKNOWN: 'chip-active-unk' };
+  document.querySelectorAll('#safe-status-chips .chip').forEach(c => {
+    c.className = 'chip';
+    const btnStatus = c.getAttribute('onclick')?.match(/'([^']*)'/) ?.[1] ?? '';
+    if (btnStatus === status) c.classList.add(chipMap[status] || 'chip-active-all');
+  });
+  applySafeFilters();
+}
+
+// ── Report download ───────────────────────────────────────────── //
+async function downloadReport(vendorSelId, companySelId) {
+  const vendor  = vendorSelId  ? (document.getElementById(vendorSelId)?.value  || '') : '';
+  const company = companySelId ? (document.getElementById(companySelId)?.value || '') : '';
+
+  // Determine which button triggered this and show spinner
+  const btnId = vendorSelId?.startsWith('risk') ? 'btn-export-risk'
+              : vendorSelId?.startsWith('safe') ? 'btn-export-safe'
+              : 'btn-report';
+  const btn = document.getElementById(btnId);
+  const origHTML = btn?.innerHTML;
+  if (btn) { btn.innerHTML = '<span class="spin-icon">&#9696;</span> Generating…'; btn.classList.add('btn-loading'); }
+
+  const params = new URLSearchParams();
+  if (vendor)  params.set('vendor',  vendor);
+  if (company) params.set('company', company);
+  const apiUrl = '/api/report/excel' + (params.toString() ? '?' + params.toString() : '');
+
+  let label = 'Generating report';
+  if (vendor && company) label += ` (${vendor} \xB7 ${company})`;
+  else if (vendor)       label += ` (${vendor})`;
+  else if (company)      label += ` (${company})`;
+  toast(label + '…', 'info');
+
+  try {
+    const resp = await fetch(apiUrl);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      toast(err.message || 'Report generation failed', 'err');
+      return;
+    }
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    const suffix = (vendor || company) ? `_${(vendor+company).replace(/\s+/g,'_').replace(/[^a-z0-9_]/gi,'')}` : '';
+    a.download = `network_eol_report_${new Date().toISOString().slice(0,10).replace(/-/g,'')}${suffix}.xlsx`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 5000);
+    toast('Download started!', 'ok');
+  } catch (e) {
+    toast('Download error: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.innerHTML = origHTML; btn.classList.remove('btn-loading'); }
+  }
+}
+
+// ── Utilities ─────────────────────────────────────────────────── //
+function fmtDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+}
+
+function statusColor(isoDate) {
+  const days = (new Date(isoDate) - Date.now()) / 86400000;
+  if (days < 0) return 'var(--red)';
+  if (days < 180) return 'var(--red)';
+  if (days < 365) return 'var(--amber)';
+  return 'inherit';
+}
+
+function statusPill(key) {
+  const map = {
+    EXPIRED:  ['pill-expired', '&#128308; EOL Expired'],
+    CRITICAL: ['pill-critical','&#128680; Critical'],
+    WARNING:  ['pill-warning', '&#9888;&#65039; Warning'],
+    MONITOR:  ['pill-monitor', '&#128065; Monitor'],
+    SAFE:     ['pill-safe',    '&#9989; Safe'],
+    UNKNOWN:  ['pill-unknown', '&#10067; Not Announced'],
+  };
+  const [cls, label] = map[key] || ['pill-unknown','&#10067; Not Announced'];
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function getStatusInfo(eol) {
+  if (!eol.end_of_support) return {label:'EOS/EOL Not Announced', cls:'pill-unknown'};
+  const days = (new Date(eol.end_of_support) - Date.now()) / 86400000;
+  if (days < 0)   return {label:'EOL Expired', cls:'pill-expired'};
+  if (days < 180) return {label:'Critical',    cls:'pill-critical'};
+  if (days < 365) return {label:'Warning',     cls:'pill-warning'};
+  if (days < 730) return {label:'Monitor',     cls:'pill-monitor'};
+  return {label:'Safe', cls:'pill-safe'};
+}
+
+// ── Column sorting ────────────────────────────────────────────── //
+function sortTable(tableId, colIdx, type) {
+  const table = document.getElementById(tableId);
+  const tbody = table.querySelector('tbody');
+  const rows  = Array.from(tbody.querySelectorAll('tr')).filter(r => r.cells.length > 1);
+  if (!rows.length) return;
+
+  const key = `${tableId}-${colIdx}`;
+  const asc = !_sortState[key];
+  _sortState[key] = asc;
+
+  table.querySelectorAll('th').forEach(th => th.classList.remove('sort-asc','sort-desc'));
+  const ths = table.querySelectorAll('thead th');
+  if (ths[colIdx]) ths[colIdx].classList.add(asc ? 'sort-asc' : 'sort-desc');
+
+  const statusOrder = { EXPIRED:0, CRITICAL:1, WARNING:2, MONITOR:3, SAFE:4, UNKNOWN:5 };
+
+  rows.sort((a, b) => {
+    if (type === 'status') {
+      const av = statusOrder[a.dataset.status] ?? 9;
+      const bv = statusOrder[b.dataset.status] ?? 9;
+      return asc ? av - bv : bv - av;
+    }
+    const av = a.cells[colIdx]?.textContent.trim() || '';
+    const bv = b.cells[colIdx]?.textContent.trim() || '';
+    if (type === 'days') {
+      const parse = v => v === '—' ? Infinity : v.includes('overdue') ? -(parseFloat(v) || 0) : (parseFloat(v) || Infinity);
+      return asc ? parse(av) - parse(bv) : parse(bv) - parse(av);
+    }
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(tr => tbody.appendChild(tr));
+}
+
+// ── Sidebar toggle ────────────────────────────────────────────── //
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('collapsed');
+  document.querySelector('.main').classList.toggle('sidebar-collapsed');
+}
+
+// ── Init ──────────────────────────────────────────────────────── //
+(async function init() {
+  loadVendors();
+
+  // Restore ServiceNow URL from localStorage (never password)
+  const savedUrl = localStorage.getItem('snow_url');
+  if (savedUrl) document.getElementById('snow-url').value = savedUrl;
+
+  // Check if an Excel file was already uploaded (server-side state)
+  const upStatus = await apiFetch('/api/upload/status');
+  if (upStatus.loaded && upStatus.count > 0) {
+    _excelLoaded = true;
+    document.getElementById('excel-status-row').style.display = 'flex';
+    document.getElementById('excel-label').textContent = `Excel: ${upStatus.count} devices`;
+    document.getElementById('nb-excel').textContent = upStatus.count;
+    document.getElementById('nb-excel').style.display = '';
+    const excelOpt = document.getElementById('scan-src-excel');
+    excelOpt.textContent = `Uploaded Excel — ${upStatus.count} devices (${upStatus.filename})`;
+    excelOpt.style.display = '';
+    document.getElementById('scan-excel-banner').style.display = 'block';
+    document.getElementById('scan-excel-info').textContent =
+      `${upStatus.filename} — ${upStatus.count} devices ready`;
+    // Show upload success state in upload panel
+    document.getElementById('upload-success-banner').style.display = 'block';
+    document.getElementById('upload-success-msg').textContent =
+      `File "${upStatus.filename}" loaded — ${upStatus.count} devices ready`;
+    document.getElementById('dz-icon').textContent  = '📊';
+    document.getElementById('dz-title').textContent = upStatus.filename;
+    document.getElementById('dz-sub').textContent   =
+      `${upStatus.count} devices — click to replace`;
+    document.getElementById('upload-btn-row').style.display = 'flex';
+    document.getElementById('btn-upload').textContent = 'Re-analyse This File';
+    if (upStatus.preview && upStatus.preview.length)
+      _renderPreview(upStatus.preview, upStatus.count);
+  }
+
+  // Restore last scan results (SQLite-persisted, survives server restarts)
+  const status = await apiFetch('/api/status');
+  if (status.scan_done) {
+    const s = await apiFetch('/api/analyse/status');
+    const at_risk = s.at_risk || [];
+    const safe    = s.safe    || [];
+    _allResults = {at_risk, safe};
+    renderDashboard(s.stats, at_risk, safe);
+    renderRiskTable(at_risk);
+    renderSafeTable(safe);
+    document.getElementById('nb-risk').textContent = at_risk.length;
+    document.getElementById('nb-safe').textContent = safe.length;
+    document.getElementById('btn-report').disabled = false;
+  }
+})();
+</script>
+</body>
+</html>
