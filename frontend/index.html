@@ -353,6 +353,23 @@ th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin-icon { display: inline-block; animation: spin .7s linear infinite; }
 
+/* ── User badge (topbar) ───────────────────────────────────── */
+.user-badge {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; margin-left: 4px;
+  border-left: 1px solid var(--border);
+}
+.user-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: linear-gradient(135deg, #1f6feb, #58a6ff);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.user-role-admin {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  background: rgba(9,105,218,.12); color: var(--accent); font-weight: 600;
+}
+
 /* ── Progress percentage badge ─────────────────────────────── */
 .pct-badge {
   font-size: 12px; font-weight: 700; color: var(--accent);
@@ -441,6 +458,12 @@ th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
     <div class="topbar-right">
       <button class="btn btn-sm" onclick="loadDevices()">↻ Reload Devices</button>
       <button class="btn btn-sm btn-primary" onclick="downloadReport()" id="btn-report" disabled>⬇ Export Excel</button>
+      <div class="user-badge" id="user-badge" style="display:none">
+        <div class="user-avatar" id="user-avatar"></div>
+        <span id="user-name" style="font-size:12px;font-weight:500;"></span>
+        <span class="user-role-admin" id="user-role-badge" style="display:none">Admin</span>
+        <button class="btn btn-sm btn-danger" onclick="doLogout()" style="padding:3px 9px;font-size:11px;">Logout</button>
+      </div>
     </div>
   </div>
 
@@ -884,6 +907,7 @@ th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
       <div class="progress-wrap" id="progress-wrap" style="display:none;max-width:600px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <span style="font-size:13px;font-weight:600;">Scan Progress</span>
+          <span style="font-size:11px;color:var(--muted);" id="scan-owner-label"></span>
           <span style="font-size:12px;color:var(--muted);" id="progress-count">0 / 0</span>
           <span class="pct-badge" id="progress-pct">0%</span>
         </div>
@@ -908,7 +932,7 @@ th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
         </div>
         <table id="history-table">
           <thead><tr>
-            <th>#</th><th>Run At</th><th>Source</th><th>Devices</th>
+            <th>#</th><th>Run At</th><th>Source</th><th>Run By</th><th>Devices</th>
             <th style="color:var(--red)">Expired</th>
             <th style="color:var(--red)">Critical</th>
             <th style="color:var(--amber)">Warning</th>
@@ -917,7 +941,7 @@ th.sort-desc::after { content: ' \25BC'; font-size: 8px; opacity: .8; }
             <th>Not Announced</th>
           </tr></thead>
           <tbody id="history-tbody">
-            <tr><td colspan="10"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div><div class="empty-sub">Run a scan to start tracking history</div></div></td></tr>
+            <tr><td colspan="11"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div><div class="empty-sub">Run a scan to start tracking history</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -939,6 +963,7 @@ let _excelLoaded      = false;
 let _excelFile        = null;
 let _riskStatusFilter = '';
 let _safeStatusFilter = '';
+let _currentUser      = null;
 const _sortState      = {};
 
 // ── Panel switching ──────────────────────────────────────────── //
@@ -970,9 +995,32 @@ function toast(msg, type='info') {
 async function apiFetch(path, opts={}) {
   const r = await fetch(API + path, {
     headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
     ...opts,
   });
+  if (r.status === 401) {
+    window.location.href = '/login';
+    return null;
+  }
   return r.json();
+}
+
+// ── Auth / user ──────────────────────────────────────────────── //
+async function doLogout() {
+  await apiFetch('/api/auth/logout', {method: 'POST'});
+  window.location.href = '/login';
+}
+
+function _renderUserBadge(user) {
+  _currentUser = user;
+  const badge  = document.getElementById('user-badge');
+  const avatar = document.getElementById('user-avatar');
+  const name   = document.getElementById('user-name');
+  const role   = document.getElementById('user-role-badge');
+  avatar.textContent = (user.username || '?')[0].toUpperCase();
+  name.textContent   = user.username;
+  if (user.role === 'admin') role.style.display = 'inline';
+  badge.style.display = 'flex';
 }
 
 // ── Load devices ─────────────────────────────────────────────── //
@@ -1316,6 +1364,10 @@ function _updateProgress(s) {
   document.getElementById('progress-bar').style.width = pct + '%';
   document.getElementById('progress-count').textContent = `${s.processed} / ${s.total}`;
   document.getElementById('progress-pct').textContent = pct + '%';
+  if (s.scan_owner) {
+    const el = document.getElementById('scan-owner-label');
+    if (el) el.textContent = 'Started by ' + s.scan_owner;
+  }
   if (s.log && s.log.length) {
     const logBox = document.getElementById('log-box');
     logBox.textContent = s.log.join('\n');
@@ -1352,16 +1404,26 @@ async function _pollScan() {
 // ── Scan history ──────────────────────────────────────────────── //
 async function loadHistory() {
   const data = await apiFetch('/api/scans/history?limit=25');
+  if (!data) return;
   const tbody = document.getElementById('history-tbody');
   if (!data.scans || !data.scans.length) {
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">No scan history yet</div></div></td></tr>';
     return;
   }
-  tbody.innerHTML = data.scans.map((s, idx) => `
+  tbody.innerHTML = data.scans.map((s, idx) => {
+    const initials = (s.run_by || 'S')[0].toUpperCase();
+    const isMe     = _currentUser && s.run_by === _currentUser.username;
+    return `
     <tr>
       <td style="color:var(--muted);font-size:11px">${data.scans.length - idx}</td>
       <td style="white-space:nowrap">${new Date(s.run_at).toLocaleString()}</td>
       <td><span class="pill ${s.source==='snow'?'pill-monitor':'pill-safe'}">${s.source}</span></td>
+      <td>
+        <span style="display:inline-flex;align-items:center;gap:6px;">
+          <span style="width:22px;height:22px;border-radius:50%;background:${isMe ? 'linear-gradient(135deg,#1f6feb,#58a6ff)' : 'var(--surface2)'};border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:${isMe ? '#fff' : 'var(--muted)'};font-size:10px;font-weight:700;">${initials}</span>
+          <span style="font-size:12px;${isMe ? 'font-weight:600;color:var(--accent)' : ''}">${s.run_by || 'system'}${isMe ? ' (you)' : ''}</span>
+        </span>
+      </td>
       <td style="font-weight:600">${s.device_count}</td>
       <td style="color:var(--red);font-weight:600">${s.stats.expired||0}</td>
       <td style="color:var(--red);font-weight:600">${s.stats.critical||0}</td>
@@ -1369,8 +1431,8 @@ async function loadHistory() {
       <td style="color:var(--amber)">${s.stats.monitor||0}</td>
       <td style="color:var(--green);font-weight:600">${s.stats.safe||0}</td>
       <td style="color:var(--muted)">${s.stats.unknown||0}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 // ── Render dashboard ─────────────────────────────────────────── //
@@ -1765,6 +1827,17 @@ function toggleSidebar() {
 
 // ── Init ──────────────────────────────────────────────────────── //
 (async function init() {
+  // Auth check — redirect to login if not authenticated
+  try {
+    const meResp = await fetch('/api/auth/me', {credentials: 'same-origin'});
+    if (meResp.status === 401) { window.location.href = '/login'; return; }
+    const me = await meResp.json();
+    if (me.status !== 'ok')   { window.location.href = '/login'; return; }
+    _renderUserBadge(me);
+  } catch (e) {
+    window.location.href = '/login'; return;
+  }
+
   loadVendors();
 
   // Restore ServiceNow URL from localStorage (never password)

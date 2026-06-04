@@ -41,6 +41,21 @@ def init_db():
                 safe_json    TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                username      TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                email         TEXT DEFAULT '',
+                role          TEXT DEFAULT 'user',
+                created_at    TEXT NOT NULL
+            )
+        """)
+        # Migration: add run_by column to existing scan_history tables
+        try:
+            conn.execute("ALTER TABLE scan_history ADD COLUMN run_by TEXT DEFAULT ''")
+        except Exception:
+            pass  # column already exists
         conn.commit()
 
 
@@ -115,17 +130,18 @@ def _record_to_dict(record) -> dict:
 # ── Scan history ──────────────────────────────────────────────── #
 
 def save_scan(source: str, device_count: int, stats: dict,
-              at_risk_json: list, safe_json: list):
+              at_risk_json: list, safe_json: list, run_by: str = ""):
     with _lock, _connect() as conn:
         conn.execute(
             """INSERT INTO scan_history
-               (run_at, source, device_count, stats_json, at_risk_json, safe_json)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (run_at, source, device_count, stats_json, at_risk_json, safe_json, run_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 datetime.now().isoformat(), source, device_count,
                 json.dumps(stats),
                 json.dumps(at_risk_json),
                 json.dumps(safe_json),
+                run_by,
             ),
         )
         conn.commit()
@@ -134,12 +150,13 @@ def save_scan(source: str, device_count: int, stats: dict,
 def get_latest_scan() -> Optional[dict]:
     with _lock, _connect() as conn:
         row = conn.execute(
-            """SELECT run_at, source, device_count, stats_json, at_risk_json, safe_json
+            """SELECT run_at, source, device_count, stats_json, at_risk_json, safe_json,
+                      COALESCE(run_by, '') as run_by
                FROM scan_history ORDER BY id DESC LIMIT 1"""
         ).fetchone()
     if not row:
         return None
-    run_at, source, device_count, stats_json, at_risk_json, safe_json = row
+    run_at, source, device_count, stats_json, at_risk_json, safe_json, run_by = row
     return {
         "run_at":       run_at,
         "source":       source,
@@ -147,26 +164,91 @@ def get_latest_scan() -> Optional[dict]:
         "stats":        json.loads(stats_json),
         "at_risk":      json.loads(at_risk_json),
         "safe":         json.loads(safe_json),
+        "run_by":       run_by,
     }
 
 
 def get_scan_history(limit: int = 20) -> list:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            """SELECT id, run_at, source, device_count, stats_json
+            """SELECT id, run_at, source, device_count, stats_json,
+                      COALESCE(run_by, '') as run_by
                FROM scan_history ORDER BY id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
     result = []
-    for row_id, run_at, source, device_count, stats_json in rows:
+    for row_id, run_at, source, device_count, stats_json, run_by in rows:
         result.append({
             "id":           row_id,
             "run_at":       run_at,
             "source":       source,
             "device_count": device_count,
             "stats":        json.loads(stats_json),
+            "run_by":       run_by or "system",
         })
     return result
+
+
+# ── User management ───────────────────────────────────────────── #
+
+def create_user(username: str, password: str, email: str = "", role: str = "user") -> Optional[dict]:
+    """Create a new user. Returns user dict or None if username already taken."""
+    from werkzeug.security import generate_password_hash
+    import sqlite3 as _sqlite3
+    pw_hash = generate_password_hash(password)
+    uname   = username.lower().strip()
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                """INSERT INTO users (username, password_hash, email, role, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (uname, pw_hash, email.strip(), role, datetime.now().isoformat()),
+            )
+            conn.commit()
+            user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return {"id": user_id, "username": uname, "email": email.strip(), "role": role}
+    except _sqlite3.IntegrityError:
+        return None  # username taken
+
+
+def get_user_by_username(username: str) -> Optional[dict]:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT id, username, password_hash, email, role, created_at FROM users WHERE username = ?",
+            (username.lower().strip(),),
+        ).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "username": row[1], "password_hash": row[2],
+            "email": row[3], "role": row[4], "created_at": row[5]}
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT id, username, password_hash, email, role, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "username": row[1], "password_hash": row[2],
+            "email": row[3], "role": row[4], "created_at": row[5]}
+
+
+def verify_user_password(username: str, password: str) -> Optional[dict]:
+    """Returns user dict if credentials are valid, else None."""
+    from werkzeug.security import check_password_hash
+    user = get_user_by_username(username)
+    if not user:
+        return None
+    if check_password_hash(user["password_hash"], password):
+        return user
+    return None
+
+
+def get_user_count() -> int:
+    with _lock, _connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
 # ── Result serialization helpers ──────────────────────────────── #

@@ -18,8 +18,12 @@ import threading
 import traceback
 from datetime import date, datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, jsonify, request, send_file, Response
+from flask import Flask, jsonify, request, send_file, Response, redirect, url_for
 from flask_cors import CORS
+from flask_login import (
+    LoginManager, UserMixin,
+    login_user, logout_user, login_required, current_user,
+)
 
 # Load .env if present
 try:
@@ -38,11 +42,39 @@ from core.live_scraper import fetch_live, VENDOR_FETCHERS
 from core.cache      import (
     save_scan, get_latest_scan, get_scan_history,
     result_to_dict, dict_to_result,
+    create_user, get_user_by_username, get_user_by_id,
+    verify_user_password, get_user_count,
 )
 from reports.excel_report import ExcelReportGenerator
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
-CORS(app)
+CORS(app, supports_credentials=True)
+
+# ── Auth setup ────────────────────────────────────────────────── #
+app.secret_key = os.environ.get("SECRET_KEY", "eol-agent-dev-key-change-in-production")
+
+login_manager = LoginManager(app)
+login_manager.login_view = None  # API-driven; no redirect
+
+
+class AppUser(UserMixin):
+    def __init__(self, user_id: int, username: str, role: str = "user"):
+        self.id       = user_id
+        self.username = username
+        self.role     = role
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    row = get_user_by_id(int(user_id))
+    if row:
+        return AppUser(row["id"], row["username"], row.get("role", "user"))
+    return None
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    return jsonify({"status": "error", "message": "Authentication required"}), 401
 
 PORT = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 8080)))
 
@@ -56,6 +88,7 @@ _state = {
     "scan_done":      False,
     "scan_source":    "sample",
     "scan_total":     0,
+    "scan_owner":     "",        # username who started the current/last scan
     # Excel upload state
     "excel_loaded":   False,
     "excel_filename": "",
@@ -129,12 +162,13 @@ def _current_status_payload(include_results: bool = False) -> dict:
         stats   = _state["last_stats"]
 
     payload = {
-        "running":   running,
-        "done":      done,
-        "processed": len(results),
-        "total":     scan_total,
-        "log":       log,
-        "stats":     stats,
+        "running":    running,
+        "done":       done,
+        "processed":  len(results),
+        "total":      scan_total,
+        "log":        log,
+        "stats":      stats,
+        "scan_owner": _state.get("scan_owner", ""),
     }
     if include_results or done:
         payload["at_risk"] = at_risk
@@ -147,11 +181,88 @@ def _current_status_payload(include_results: bool = False) -> dict:
 # ─────────────────────────────────────────────────────────────── #
 
 @app.route("/")
+@login_required
 def index():
     return send_file("frontend/index.html")
 
 
+@app.route("/login")
+def login_page():
+    return send_file("frontend/login.html")
+
+
+# ── Auth API routes ───────────────────────────────────────────── #
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    body     = request.json or {}
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+    email    = body.get("email", "").strip()
+
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Username and password are required"}), 400
+    if len(username) < 3:
+        return jsonify({"status": "error", "message": "Username must be at least 3 characters"}), 400
+    if len(password) < 6:
+        return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
+    if not all(c.isalnum() or c in "-_" for c in username):
+        return jsonify({"status": "error", "message": "Username may only contain letters, numbers, hyphens, and underscores"}), 400
+
+    # First registered user becomes admin
+    role = "admin" if get_user_count() == 0 else "user"
+    user = create_user(username, password, email, role)
+    if not user:
+        return jsonify({"status": "error", "message": "Username already taken"}), 409
+
+    app_user = AppUser(user["id"], user["username"], user["role"])
+    login_user(app_user, remember=True)
+    return jsonify({"status": "ok", "username": user["username"], "role": user["role"]})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body     = request.json or {}
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Username and password are required"}), 400
+
+    user = verify_user_password(username, password)
+    if not user:
+        return jsonify({"status": "error", "message": "Invalid username or password"}), 401
+
+    app_user = AppUser(user["id"], user["username"], user.get("role", "user"))
+    login_user(app_user, remember=body.get("remember", False))
+    return jsonify({"status": "ok", "username": user["username"], "role": user.get("role", "user")})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@login_required
+def auth_logout():
+    logout_user()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/auth/me")
+@login_required
+def auth_me():
+    return jsonify({
+        "status":   "ok",
+        "username": current_user.username,
+        "role":     current_user.role,
+    })
+
+
+@app.route("/api/auth/user-count")
+def auth_user_count():
+    """Public endpoint — lets the login page display the first-user admin hint."""
+    return jsonify({"count": get_user_count()})
+
+
 @app.route("/api/status")
+@login_required
 def status():
     return jsonify({
         "status":          "running",
@@ -163,6 +274,7 @@ def status():
 
 
 @app.route("/api/vendors")
+@login_required
 def vendors():
     return jsonify({"vendors": [
         {"name": "Cisco",            "portal": "https://api.cisco.com/supporttools/eox",                          "type": "REST API"},
@@ -181,6 +293,7 @@ def vendors():
 # ── ServiceNow ───────────────────────────────────────────────── #
 
 @app.route("/api/connect/servicenow", methods=["POST"])
+@login_required
 def connect_snow():
     body  = request.json or {}
     url   = body.get("url", "").strip()
@@ -259,6 +372,7 @@ def _cell(row, idx, default=""):
 
 
 @app.route("/api/upload/excel", methods=["POST"])
+@login_required
 def upload_excel():
     if "file" not in request.files:
         return jsonify({"status": "error", "message": "No file part in request"}), 400
@@ -465,6 +579,7 @@ def upload_excel():
 
 
 @app.route("/api/upload/status")
+@login_required
 def upload_status():
     return jsonify({
         "loaded":   _state["excel_loaded"],
@@ -477,6 +592,7 @@ def upload_status():
 # ── Device loading ────────────────────────────────────────────── #
 
 @app.route("/api/devices", methods=["GET"])
+@login_required
 def get_devices():
     source = request.args.get("source", "auto")
     if source == "snow" or (source == "auto" and _state["snow_config"]):
@@ -501,6 +617,7 @@ def get_devices():
 # ── Live single-part lookup ───────────────────────────────────── #
 
 @app.route("/api/lookup", methods=["POST"])
+@login_required
 def lookup_part():
     body      = request.json or {}
     part_code = body.get("part_code", "").strip()
@@ -543,6 +660,7 @@ def lookup_part():
 # ── Full analysis (parallel, async background) ────────────────── #
 
 @app.route("/api/analyse", methods=["POST"])
+@login_required
 def run_analysis():
     if _state["scan_running"]:
         return jsonify({"status": "already_running"}), 409
@@ -550,6 +668,7 @@ def run_analysis():
     body     = request.json or {}
     source   = body.get("source", "sample")
     use_live = body.get("use_live", False)
+    run_by   = current_user.username   # capture before background thread
 
     if source == "snow" and _state["snow_config"]:
         cfg     = _state["snow_config"]
@@ -568,6 +687,7 @@ def run_analysis():
         _state["scan_done"]    = False
         _state["scan_source"]  = source
         _state["scan_total"]   = len(devices)
+        _state["scan_owner"]   = run_by
 
     def _run():
         clear_html_cache()   # reset shared vendor-page HTML cache for this scan
@@ -611,7 +731,7 @@ def run_analysis():
             at_risk = [result_to_dict(r) for r in final if r.is_at_risk]
             safe    = [result_to_dict(r) for r in final if r.is_safe]
             stats   = EOLAnalyser.summary_stats(final)
-            save_scan(source, len(final), stats, at_risk, safe)
+            save_scan(source, len(final), stats, at_risk, safe, run_by=run_by)
             with _state_lock:
                 _state["last_at_risk"] = at_risk
                 _state["last_safe"]    = safe
@@ -633,6 +753,7 @@ def run_analysis():
 # ── SSE: real-time scan progress ──────────────────────────────── #
 
 @app.route("/api/analyse/stream")
+@login_required
 def stream_analysis():
     """Server-Sent Events endpoint — replaces polling."""
     def generate():
@@ -668,6 +789,7 @@ def stream_analysis():
 # ── Polling fallback (kept for compatibility) ─────────────────── #
 
 @app.route("/api/analyse/status")
+@login_required
 def analysis_status():
     return jsonify(_current_status_payload(include_results=True))
 
@@ -675,6 +797,7 @@ def analysis_status():
 # ── Scan history ──────────────────────────────────────────────── #
 
 @app.route("/api/scans/history")
+@login_required
 def scans_history():
     limit = int(request.args.get("limit", 20))
     scans = get_scan_history(limit)
@@ -684,6 +807,7 @@ def scans_history():
 # ── Excel report ──────────────────────────────────────────────── #
 
 @app.route("/api/report/excel")
+@login_required
 def download_excel():
     vendor_filter  = request.args.get("vendor",  "").strip()
     company_filter = request.args.get("company", "").strip()
