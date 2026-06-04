@@ -181,8 +181,9 @@ def _current_status_payload(include_results: bool = False) -> dict:
 # ─────────────────────────────────────────────────────────────── #
 
 @app.route("/")
-@login_required
 def index():
+    if not current_user.is_authenticated:
+        return redirect(url_for("login_page"))
     return send_file("frontend/index.html")
 
 
