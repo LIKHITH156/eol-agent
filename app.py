@@ -43,7 +43,7 @@ from core.cache      import (
     save_scan, get_latest_scan, get_scan_history,
     result_to_dict, dict_to_result,
     create_user, get_user_by_username, get_user_by_id,
-    verify_user_password, get_user_count,
+    verify_user_password, get_user_count, update_user_password,
 )
 from reports.excel_report import ExcelReportGenerator
 
@@ -254,6 +254,23 @@ def auth_me():
         "username": current_user.username,
         "role":     current_user.role,
     })
+
+
+@app.route("/api/auth/reset-password", methods=["POST"])
+def auth_reset_password():
+    body         = request.json or {}
+    username     = body.get("username", "").strip()
+    new_password = body.get("new_password", "").strip()
+
+    if not username or not new_password:
+        return jsonify({"status": "error", "message": "Username and new password are required"}), 400
+    if len(new_password) < 6:
+        return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
+
+    if not update_user_password(username, new_password):
+        return jsonify({"status": "error", "message": "Username not found"}), 404
+
+    return jsonify({"status": "ok", "message": "Password reset successfully. You can now sign in."})
 
 
 @app.route("/api/auth/user-count")

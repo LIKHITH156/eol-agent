@@ -251,6 +251,19 @@ def get_user_count() -> int:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
+def update_user_password(username: str, new_password: str) -> bool:
+    """Update a user's password. Returns True if the user existed, False otherwise."""
+    from werkzeug.security import generate_password_hash
+    pw_hash = generate_password_hash(new_password)
+    with _lock, _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (pw_hash, username.lower().strip()),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 # ── Result serialization helpers ──────────────────────────────── #
 
 def result_to_dict(r) -> dict:

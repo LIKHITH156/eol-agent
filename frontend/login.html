@@ -170,12 +170,13 @@ body::before {
       </svg>
     </div>
     <div class="logo-title">EOL Intelligence</div>
-    <div class="logo-sub">Network Lifecycle Agent v3.0</div>
+    <div class="logo-sub">Network Lifecycle Agent v1.0</div>
   </div>
 
   <div class="tab-bar">
     <button class="tab-btn active" id="tab-login"    onclick="switchTab('login')">Sign In</button>
     <button class="tab-btn"        id="tab-register" onclick="switchTab('register')">Create Account</button>
+    <button class="tab-btn"        id="tab-forgot"   onclick="switchTab('forgot')">Reset Password</button>
   </div>
 
   <div id="msg" class="msg"></div>
@@ -193,6 +194,16 @@ body::before {
       <input id="login-pwd" type="password" placeholder="••••••••"
              autocomplete="current-password"
              onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="login-remember" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
+        Remember me
+      </label>
+      <button type="button" onclick="switchTab('forgot')"
+        style="background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;padding:0;font-family:inherit;">
+        Forgot password?
+      </button>
     </div>
     <button class="btn-submit" id="btn-login" onclick="doLogin()">
       <span id="login-spinner"></span>
@@ -238,9 +249,42 @@ body::before {
     </div>
   </div>
 
+  <!-- ── Reset Password ── -->
+  <div id="form-forgot" style="display:none">
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5;">
+      Enter your username and choose a new password below.
+    </p>
+    <div class="form-group">
+      <label>Username <span style="color:var(--red)">*</span></label>
+      <input id="forgot-user" type="text" placeholder="Your username"
+             autocomplete="username"
+             onkeydown="if(event.key==='Enter')doResetPassword()">
+    </div>
+    <div class="form-group">
+      <label>New Password <span style="color:var(--red)">*</span> <span style="color:var(--muted);font-size:10px;">(6+ characters)</span></label>
+      <input id="forgot-pwd" type="password" placeholder="Choose a new password"
+             autocomplete="new-password"
+             oninput="checkStrength2(this.value)"
+             onkeydown="if(event.key==='Enter')doResetPassword()">
+      <div class="pwd-strength-wrap">
+        <div class="pwd-strength-fill" id="pwd-bar2"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Confirm New Password <span style="color:var(--red)">*</span></label>
+      <input id="forgot-pwd2" type="password" placeholder="Repeat new password"
+             autocomplete="new-password"
+             onkeydown="if(event.key==='Enter')doResetPassword()">
+    </div>
+    <button class="btn-submit" id="btn-forgot" onclick="doResetPassword()">
+      <span id="forgot-spinner"></span>
+      Reset Password →
+    </button>
+  </div>
+
   <hr class="divider">
   <div class="card-footer">
-    <strong>v3.0</strong> · 9 vendor portals · SQLite cache · Multi-user
+    <strong>v1.0</strong> · 9 vendor portals · SQLite cache · Multi-user
   </div>
 </div>
 
@@ -265,13 +309,14 @@ body::before {
     _activeTab = tab;
     document.getElementById('tab-login').classList.toggle('active',    tab === 'login');
     document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+    document.getElementById('tab-forgot').classList.toggle('active',   tab === 'forgot');
     document.getElementById('form-login').style.display    = tab === 'login'    ? 'block' : 'none';
     document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none';
+    document.getElementById('form-forgot').style.display   = tab === 'forgot'   ? 'block' : 'none';
     hideMsg();
-    // Focus first input of the active form
-    const inp = tab === 'login'
-      ? document.getElementById('login-user')
-      : document.getElementById('reg-user');
+    const inp = tab === 'login'    ? document.getElementById('login-user')
+              : tab === 'register' ? document.getElementById('reg-user')
+              :                      document.getElementById('forgot-user');
     setTimeout(() => inp && inp.focus(), 50);
   }
 
@@ -303,6 +348,7 @@ body::before {
   async function doLogin() {
     const username = document.getElementById('login-user').value.trim();
     const password = document.getElementById('login-pwd').value;
+    const remember = document.getElementById('login-remember').checked;
     if (!username || !password) { showMsg('Enter your username and password.'); return; }
 
     const btn = document.getElementById('btn-login');
@@ -315,7 +361,7 @@ body::before {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
-        body: JSON.stringify({username, password}),
+        body: JSON.stringify({username, password, remember}),
       });
       const data = await r.json();
       if (data.status === 'ok') {
@@ -371,6 +417,61 @@ body::before {
     } finally {
       btn.disabled = false;
       document.getElementById('reg-spinner').textContent = '';
+    }
+  }
+  function checkStrength2(pwd) {
+    const bar = document.getElementById('pwd-bar2');
+    if (!pwd) { bar.style.width = '0'; return; }
+    let score = 0;
+    if (pwd.length >= 6)            score++;
+    if (pwd.length >= 10)           score++;
+    if (/[A-Z]/.test(pwd))          score++;
+    if (/[0-9]/.test(pwd))          score++;
+    if (/[^A-Za-z0-9]/.test(pwd))   score++;
+    const cols = ['#f85149','#e3b341','#e3b341','#3fb950','#3fb950'];
+    const pcts = [  '20%',    '40%',    '60%',    '80%',   '100%'];
+    bar.style.background = cols[score - 1] || 'var(--border2)';
+    bar.style.width      = pcts[score - 1] || '10%';
+  }
+
+  async function doResetPassword() {
+    const username  = document.getElementById('forgot-user').value.trim();
+    const password  = document.getElementById('forgot-pwd').value;
+    const password2 = document.getElementById('forgot-pwd2').value;
+
+    if (!username)             { showMsg('Username is required.'); return; }
+    if (!password)             { showMsg('New password is required.'); return; }
+    if (password.length < 6)   { showMsg('Password must be at least 6 characters.'); return; }
+    if (password !== password2) { showMsg('Passwords do not match.'); return; }
+
+    const btn = document.getElementById('btn-forgot');
+    btn.disabled = true;
+    document.getElementById('forgot-spinner').innerHTML = '<span class="spin">⟳</span>';
+    hideMsg();
+
+    try {
+      const r    = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({username, new_password: password}),
+      });
+      const data = await r.json();
+      if (data.status === 'ok') {
+        showMsg(data.message, 'ok');
+        document.getElementById('forgot-user').value  = '';
+        document.getElementById('forgot-pwd').value   = '';
+        document.getElementById('forgot-pwd2').value  = '';
+        document.getElementById('pwd-bar2').style.width = '0';
+        setTimeout(() => switchTab('login'), 1500);
+      } else {
+        showMsg(data.message || 'Reset failed. Check the username and try again.');
+      }
+    } catch (e) {
+      showMsg('Connection error — is the server running?');
+    } finally {
+      btn.disabled = false;
+      document.getElementById('forgot-spinner').textContent = '';
     }
   }
 </script>
