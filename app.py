@@ -375,6 +375,10 @@ def vendors():
         {"name": "Extreme Networks", "portal": "https://www.extremenetworks.com/support/end-of-life/",            "type": "HTML Table"},
         {"name": "Cisco Meraki",     "portal": "https://endoflife.date/api/cisco-meraki-mr.json",                 "type": "endoflife.date (free)"},
         {"name": "Starlink",         "portal": "https://www.starlink.com/hardware",                               "type": "Web Scrape"},
+        {"name": "Sophos",           "portal": "https://www.sophos.com/en-us/support/lifecycle",                  "type": "HTML Table (mirror)"},
+        {"name": "Ubiquiti",         "portal": "https://help.ui.com/hc/en-us/articles/1500001268521",             "type": "Vintage/Legacy List"},
+        {"name": "MikroTik",         "portal": "https://mikrotik.com/products",                                   "type": "Archived Products"},
+        {"name": "Peplink",          "portal": "https://www.peplinkworks.com/peplink-eol.asp",                    "type": "Discontinued SKUs"},
     ]})
 
 

@@ -507,6 +507,214 @@ def fetch_starlink(part_code: str) -> Optional[EOLRecord]:
 
 
 # ════════════════════════════════════════════════════════════════
+# SOPHOS — product lifecycle calendar
+# Primary: avanet.com static mirror (Official SPA requires headless browser)
+# Columns: Product | Release date | End-of-Sale | Last Renewal | End-of-Life | Successor
+# ════════════════════════════════════════════════════════════════
+
+SOPHOS_MIRROR   = "https://www.avanet.com/en/kb/sophos-product-lifecycle-calendar-end-of-sale-end-of-life/"
+SOPHOS_COMMUNITY = "https://community.sophos.com/kb/en-us/121502"
+
+def fetch_sophos(part_code: str) -> Optional[EOLRecord]:
+    import re as _re
+    p = part_code.upper().strip()
+
+    # Build alt-code variants: XGS2100 ↔ XGS 2100 ↔ XGS-2100
+    alt_codes = [p]
+    m = _re.match(r'^(XGS|XG|SG|APX|RED|AP)\s*[-]?\s*(\d+)', p)
+    if m:
+        series, num = m.group(1), m.group(2)
+        alt_codes += [f"{series} {num}", f"{series}{num}", f"{series}-{num}"]
+    alt_codes = list(dict.fromkeys(alt_codes))
+
+    for url in [SOPHOS_MIRROR, SOPHOS_COMMUNITY]:
+        r = _get(url)
+        if not r:
+            continue
+        soup = BeautifulSoup(r.text, "html.parser")
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2:
+                continue
+            headers = [c.get_text(strip=True).lower()
+                       for c in rows[0].find_all(["th", "td"])]
+            # Detect EOS / EOL column indices from header text
+            eos_col = next((i for i, h in enumerate(headers)
+                            if "end-of-sale" in h or "end of sale" in h or h == "eos"), None)
+            eol_col = next((i for i, h in enumerate(headers)
+                            if "end-of-life" in h or "end of life" in h or h == "eol"), None)
+            repl_col = next((i for i, h in enumerate(headers)
+                             if "successor" in h or "replacement" in h or "migrate" in h), None)
+            # Default column positions if headers not detected
+            if eos_col is None and eol_col is None:
+                eos_col, eol_col = 2, 4   # typical Sophos table layout
+            elif eos_col is None:
+                eos_col = max(0, eol_col - 1)
+            elif eol_col is None:
+                eol_col = eos_col + 1
+
+            for row in rows[1:]:
+                cells = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
+                if not cells:
+                    continue
+                row_upper = " ".join(cells).upper()
+                row_norm  = row_upper.replace("-", "").replace(" ", "")
+                if any(code in row_upper or
+                       code.replace("-","").replace(" ","") in row_norm
+                       for code in alt_codes):
+                    eos  = _parse(cells[eos_col])  if eos_col  is not None and eos_col  < len(cells) else None
+                    eol  = _parse(cells[eol_col])  if eol_col  is not None and eol_col  < len(cells) else None
+                    repl = (cells[repl_col].strip()
+                            if repl_col is not None and repl_col < len(cells) else "")
+                    if eos or eol:
+                        return EOLRecord(
+                            part_code=part_code, vendor="Sophos",
+                            model=cells[0].strip(),
+                            end_of_sale=eos, end_of_support=eol,
+                            replacement_sku=repl,
+                            source_url=url, confidence="live-web",
+                        )
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
+# UBIQUITI — Vintage and Legacy product list
+# Official page requires SSO; try Zendesk public article API.
+# No EOL dates published — returns status marker (confidence=low).
+# ════════════════════════════════════════════════════════════════
+
+UBIQUITI_ARTICLE = "https://help.ui.com/hc/en-us/articles/1500001268521"
+
+def fetch_ubiquiti(part_code: str) -> Optional[EOLRecord]:
+    p = part_code.upper().strip()
+    alt_codes = list(dict.fromkeys([
+        p, p.replace("-", " "), p.replace("_", "-"),
+        p.replace("USW-", "US-"), p.replace("US-", "USW-"),
+    ]))
+
+    r = _get(UBIQUITI_ARTICLE)
+    if r:
+        result = _table_search(r.text, part_code, "Ubiquiti", UBIQUITI_ARTICLE)
+        if result:
+            return result
+        # Fallback: plain text match for Vintage/Legacy list
+        html_upper = r.text.upper()
+        for code in alt_codes:
+            idx = html_upper.find(code)
+            if idx >= 0:
+                ctx = html_upper[max(0, idx - 300): idx + 300]
+                label = "Legacy" if "LEGACY" in ctx else "Vintage"
+                return EOLRecord(
+                    part_code=part_code, vendor="Ubiquiti",
+                    model=part_code,
+                    replacement_name=f"Ubiquiti {label} — no longer manufactured",
+                    source_url=UBIQUITI_ARTICLE,
+                    confidence="live-web",
+                )
+
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
+# MIKROTIK — archived product detection
+# MikroTik publishes no EOL dates. Detect archived status from
+# the products page source; fall back to third-party aggregator.
+# ════════════════════════════════════════════════════════════════
+
+MIKROTIK_PRODUCTS = "https://mikrotik.com/products"
+MIKROTIK_SE       = "https://serviceexpress.com/eol-eosl-database/oem/mikrotik/"
+
+def fetch_mikrotik(part_code: str) -> Optional[EOLRecord]:
+    import re as _re
+    p = part_code.upper().strip()
+    clean = _re.sub(r'^RB[-]?', '', p)
+    alt_codes = list(dict.fromkeys(
+        [p, f"RB{clean}", f"RB-{clean}", clean]
+    ))
+
+    # 1. mikrotik.com products — SKUs are embedded in page source
+    r = _get(MIKROTIK_PRODUCTS)
+    if r:
+        html = r.text
+        for code in alt_codes:
+            idx = html.upper().find(code)
+            if idx >= 0:
+                ctx = html[max(0, idx - 300): idx + 600].lower()
+                if any(kw in ctx for kw in ("archived", "discontinued", "end of life")):
+                    return EOLRecord(
+                        part_code=part_code, vendor="MikroTik",
+                        model=part_code,
+                        replacement_name="MikroTik archived — no longer in production",
+                        source_url=MIKROTIK_PRODUCTS,
+                        confidence="live-web",
+                    )
+
+    # 2. Third-party EOL aggregator (sometimes has dates)
+    r = _get(MIKROTIK_SE)
+    if r:
+        result = _table_search(r.text, part_code, "MikroTik", MIKROTIK_SE)
+        if result:
+            return result
+
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
+# PEPLINK / PEPWAVE — discontinued SKU table
+# Peplink does not publish EOL dates. peplinkworks.com maintains
+# a community-sourced discontinued-SKU table (Description/SKU/Replacement).
+# ════════════════════════════════════════════════════════════════
+
+PEPLINK_EOL    = "https://www.peplinkworks.com/peplink-eol.asp"
+PEPLINK_LEGACY = "https://www.peplink.com/legacy-products/"
+
+def fetch_peplink(part_code: str) -> Optional[EOLRecord]:
+    import re as _re
+    p = part_code.upper().strip()
+    alt_codes = list(dict.fromkeys([
+        p, p.replace("-", " "), p.replace("_", "-"),
+        _re.sub(r'\s+', '-', p),
+    ]))
+
+    # 1. peplinkworks.com discontinued SKU table
+    # Columns: Description | SKU | Replacement Description | (optional) Replacement SKU
+    r = _get(PEPLINK_EOL)
+    if r:
+        soup = BeautifulSoup(r.text, "html.parser")
+        for row in soup.find_all("tr"):
+            cells = [td.get_text(" ", strip=True)
+                     for td in row.find_all(["td", "th"])]
+            if len(cells) < 2:
+                continue
+            row_upper = " ".join(cells).upper()
+            row_norm  = row_upper.replace("-", "").replace(" ", "")
+            if any(code in row_upper or
+                   code.replace("-","").replace(" ","") in row_norm
+                   for code in alt_codes):
+                repl_sku  = cells[3].strip() if len(cells) > 3 else ""
+                repl_name = cells[2].strip() if len(cells) > 2 else ""
+                if "contact" in repl_name.lower():
+                    repl_name = ""
+                return EOLRecord(
+                    part_code=part_code, vendor="Peplink",
+                    model=cells[0].strip(),
+                    replacement_sku=repl_sku,
+                    replacement_name=repl_name or "Peplink discontinued — no EOL dates published",
+                    source_url=PEPLINK_EOL,
+                    confidence="live-web",
+                )
+
+    # 2. Official legacy page
+    r = _get(PEPLINK_LEGACY)
+    if r:
+        result = _table_search(r.text, part_code, "Peplink", PEPLINK_LEGACY)
+        if result:
+            return result
+
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
 # endoflife.date API — universal fallback for many vendors
 # Covers: cisco-ios, juniper-junos, fortios, panos, and more
 # Portal: https://endoflife.date/api/{product}.json
@@ -518,6 +726,9 @@ EOL_DATE_PRODUCTS = {
     "Palo Alto":["pan-os"],
     "Juniper":  ["junos"],
     "Arista":   ["eos"],
+    "Ubiquiti": ["unifi", "ubiquiti-unifi"],
+    "MikroTik": ["routeros"],
+    "Sophos":   ["sophos-sfos"],
 }
 
 def fetch_endoflife_date(part_code: str, vendor: str) -> Optional[EOLRecord]:
@@ -568,6 +779,11 @@ VENDOR_FETCHERS = {
     "Palo Alto":        fetch_paloalto,
     "Extreme Networks": fetch_extreme,
     "Starlink":         fetch_starlink,
+    "Sophos":           fetch_sophos,
+    "Ubiquiti":         fetch_ubiquiti,
+    "MikroTik":         fetch_mikrotik,
+    "Peplink":          fetch_peplink,
+    "Pepwave":          fetch_peplink,
 }
 
 def fetch_live(part_code: str, vendor: str) -> Optional[EOLRecord]:
