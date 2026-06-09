@@ -48,14 +48,19 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 email         TEXT DEFAULT '',
                 role          TEXT DEFAULT 'user',
-                created_at    TEXT NOT NULL
+                created_at    TEXT NOT NULL,
+                active        INTEGER DEFAULT 1
             )
         """)
-        # Migration: add run_by column to existing scan_history tables
-        try:
-            conn.execute("ALTER TABLE scan_history ADD COLUMN run_by TEXT DEFAULT ''")
-        except Exception:
-            pass  # column already exists
+        # Migrations
+        for stmt in [
+            "ALTER TABLE scan_history ADD COLUMN run_by TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1",
+        ]:
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
         conn.commit()
 
 
@@ -211,35 +216,37 @@ def create_user(username: str, password: str, email: str = "", role: str = "user
         return None  # username taken
 
 
+def _row_to_user(row) -> dict:
+    return {
+        "id": row[0], "username": row[1], "password_hash": row[2],
+        "email": row[3], "role": row[4], "created_at": row[5],
+        "active": bool(row[6]) if len(row) > 6 else True,
+    }
+
+
 def get_user_by_username(username: str) -> Optional[dict]:
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, email, role, created_at FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, email, role, created_at, active FROM users WHERE username = ?",
             (username.lower().strip(),),
         ).fetchone()
-    if not row:
-        return None
-    return {"id": row[0], "username": row[1], "password_hash": row[2],
-            "email": row[3], "role": row[4], "created_at": row[5]}
+    return _row_to_user(row) if row else None
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
     with _lock, _connect() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, email, role, created_at FROM users WHERE id = ?",
+            "SELECT id, username, password_hash, email, role, created_at, active FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
-    if not row:
-        return None
-    return {"id": row[0], "username": row[1], "password_hash": row[2],
-            "email": row[3], "role": row[4], "created_at": row[5]}
+    return _row_to_user(row) if row else None
 
 
 def verify_user_password(username: str, password: str) -> Optional[dict]:
-    """Returns user dict if credentials are valid, else None."""
+    """Returns user dict if credentials are valid and account is active, else None."""
     from werkzeug.security import check_password_hash
     user = get_user_by_username(username)
-    if not user:
+    if not user or not user.get("active", True):
         return None
     if check_password_hash(user["password_hash"], password):
         return user
@@ -251,8 +258,51 @@ def get_user_count() -> int:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
+def list_users() -> list:
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, username, password_hash, email, role, created_at, active FROM users ORDER BY id"
+        ).fetchall()
+    return [
+        {"id": r[0], "username": r[1], "email": r[3], "role": r[4],
+         "created_at": r[5], "active": bool(r[6])}
+        for r in rows
+    ]
+
+
+def delete_user(user_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def set_user_role(user_id: int, role: str) -> bool:
+    with _lock, _connect() as conn:
+        cursor = conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def set_user_active(user_id: int, active: bool) -> bool:
+    with _lock, _connect() as conn:
+        cursor = conn.execute("UPDATE users SET active = ? WHERE id = ?",
+                              (1 if active else 0, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def admin_reset_user_password(user_id: int, new_password: str) -> bool:
+    from werkzeug.security import generate_password_hash
+    pw_hash = generate_password_hash(new_password)
+    with _lock, _connect() as conn:
+        cursor = conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                              (pw_hash, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def update_user_password(username: str, new_password: str) -> bool:
-    """Update a user's password. Returns True if the user existed, False otherwise."""
     from werkzeug.security import generate_password_hash
     pw_hash = generate_password_hash(new_password)
     with _lock, _connect() as conn:

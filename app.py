@@ -39,11 +39,13 @@ from core.servicenow import ServiceNowConnector, get_sample_devices
 from core.researcher import EOLResearcher, infer_vendor, clear_html_cache
 from core.analyser   import EOLAnalyser
 from core.live_scraper import fetch_live, VENDOR_FETCHERS
+from functools import wraps
 from core.cache      import (
     save_scan, get_latest_scan, get_scan_history,
     result_to_dict, dict_to_result,
     create_user, get_user_by_username, get_user_by_id,
-    verify_user_password, get_user_count, update_user_password,
+    verify_user_password, get_user_count,
+    list_users, delete_user, set_user_role, set_user_active, admin_reset_user_password,
 )
 from reports.excel_report import ExcelReportGenerator
 
@@ -75,6 +77,17 @@ def load_user(user_id):
 @login_manager.unauthorized_handler
 def unauthorized():
     return jsonify({"status": "error", "message": "Authentication required"}), 401
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({"status": "error", "message": "Authentication required"}), 401
+        if current_user.role != "admin":
+            return jsonify({"status": "error", "message": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 PORT = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 8080)))
 
@@ -196,6 +209,10 @@ def login_page():
 
 @app.route("/api/auth/register", methods=["POST"])
 def auth_register():
+    """Only allowed when no users exist (first-time admin bootstrap)."""
+    if get_user_count() > 0:
+        return jsonify({"status": "error", "message": "Registration is disabled. Contact your administrator."}), 403
+
     body     = request.json or {}
     username = body.get("username", "").strip()
     password = body.get("password", "").strip()
@@ -210,15 +227,13 @@ def auth_register():
     if not all(c.isalnum() or c in "-_" for c in username):
         return jsonify({"status": "error", "message": "Username may only contain letters, numbers, hyphens, and underscores"}), 400
 
-    # First registered user becomes admin
-    role = "admin" if get_user_count() == 0 else "user"
-    user = create_user(username, password, email, role)
+    user = create_user(username, password, email, "admin")
     if not user:
         return jsonify({"status": "error", "message": "Username already taken"}), 409
 
-    app_user = AppUser(user["id"], user["username"], user["role"])
+    app_user = AppUser(user["id"], user["username"], "admin")
     login_user(app_user, remember=True)
-    return jsonify({"status": "ok", "username": user["username"], "role": user["role"]})
+    return jsonify({"status": "ok", "username": user["username"], "role": "admin"})
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -256,27 +271,82 @@ def auth_me():
     })
 
 
-@app.route("/api/auth/reset-password", methods=["POST"])
-def auth_reset_password():
-    body         = request.json or {}
-    username     = body.get("username", "").strip()
-    new_password = body.get("new_password", "").strip()
-
-    if not username or not new_password:
-        return jsonify({"status": "error", "message": "Username and new password are required"}), 400
-    if len(new_password) < 6:
-        return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
-
-    if not update_user_password(username, new_password):
-        return jsonify({"status": "error", "message": "Username not found"}), 404
-
-    return jsonify({"status": "ok", "message": "Password reset successfully. You can now sign in."})
-
-
 @app.route("/api/auth/user-count")
 def auth_user_count():
-    """Public endpoint — lets the login page display the first-user admin hint."""
+    """Public endpoint — lets the login page detect first-time setup."""
     return jsonify({"count": get_user_count()})
+
+
+# ── Admin: user management ────────────────────────────────────── #
+
+@app.route("/api/admin/users", methods=["GET"])
+@admin_required
+def admin_list_users():
+    return jsonify({"status": "ok", "users": list_users()})
+
+
+@app.route("/api/admin/users", methods=["POST"])
+@admin_required
+def admin_create_user():
+    body     = request.json or {}
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+    email    = body.get("email", "").strip()
+    role     = body.get("role", "user")
+    if role not in ("admin", "user"):
+        role = "user"
+
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Username and password are required"}), 400
+    if len(username) < 3:
+        return jsonify({"status": "error", "message": "Username must be at least 3 characters"}), 400
+    if len(password) < 6:
+        return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
+    if not all(c.isalnum() or c in "-_" for c in username):
+        return jsonify({"status": "error", "message": "Username may only contain letters, numbers, hyphens, and underscores"}), 400
+
+    user = create_user(username, password, email, role)
+    if not user:
+        return jsonify({"status": "error", "message": "Username already taken"}), 409
+    return jsonify({"status": "ok", "user": user}), 201
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["DELETE"])
+@admin_required
+def admin_delete_user(user_id):
+    if user_id == current_user.id:
+        return jsonify({"status": "error", "message": "Cannot delete your own account"}), 400
+    if not delete_user(user_id):
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["PATCH"])
+@admin_required
+def admin_update_user(user_id):
+    body = request.json or {}
+
+    if "role" in body:
+        role = body["role"]
+        if role not in ("admin", "user"):
+            return jsonify({"status": "error", "message": "Invalid role"}), 400
+        if not set_user_role(user_id, role):
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+    if "active" in body:
+        if user_id == current_user.id and not body["active"]:
+            return jsonify({"status": "error", "message": "Cannot deactivate your own account"}), 400
+        if not set_user_active(user_id, bool(body["active"])):
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+    if "password" in body:
+        pw = body["password"].strip()
+        if len(pw) < 6:
+            return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
+        if not admin_reset_user_password(user_id, pw):
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/status")
