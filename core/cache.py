@@ -10,7 +10,7 @@ import threading
 from datetime import datetime, timedelta, date
 from typing import Optional
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "eol_cache.db")
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "eol_cache.db"))
 _lock = threading.Lock()
 
 
@@ -21,6 +21,8 @@ def _connect():
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _lock, _connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS eol_cache (
                 part_code  TEXT PRIMARY KEY,

@@ -137,6 +137,14 @@ def _restore_last_scan():
 
 _restore_last_scan()
 
+# ── Startup: show DB location and user count ─────────────────── #
+from core.cache import DB_PATH as _DB_PATH
+_user_count = get_user_count()
+print(f"[Startup] Database : {_DB_PATH}")
+print(f"[Startup] Users    : {_user_count} registered account(s)")
+if _user_count == 0:
+    print("[Startup] WARNING  : No users found — first-time setup will be shown")
+
 # ── Pre-configure from env if present ────────────────────────── #
 if os.environ.get("SNOW_URL"):
     _state["snow_config"] = {

@@ -19,6 +19,8 @@ env/
 
 # Generated data & reports
 data/eol_cache.db
+data/*.db-wal
+data/*.db-shm
 output/*.xlsx
 app_stdout.log
 
