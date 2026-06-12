@@ -10,8 +10,11 @@ import threading
 from datetime import datetime, timedelta, date
 from typing import Optional
 
-_DATA_DIR  = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data"))
-DB_PATH    = os.path.join(_DATA_DIR, "eol_cache.db")
+_DATA_DIR = (
+    os.environ.get("DATA_DIR")
+    or os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data"))
+)
+DB_PATH       = os.path.join(_DATA_DIR, "eol_cache.db")
 USERS_DB_PATH = os.path.join(_DATA_DIR, "users.db")
 
 _lock       = threading.Lock()
