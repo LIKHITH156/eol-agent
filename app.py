@@ -16,9 +16,9 @@ import json
 import time
 import threading
 import traceback
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, jsonify, request, send_file, Response, redirect, url_for
+from flask import Flask, jsonify, request, send_file, Response, redirect, url_for, session
 from flask_cors import CORS
 from flask_login import (
     LoginManager, UserMixin,
@@ -54,9 +54,12 @@ CORS(app, supports_credentials=True)
 
 # ── Auth setup ────────────────────────────────────────────────── #
 app.secret_key = os.environ.get("SECRET_KEY", "eol-agent-dev-key-change-in-production")
+app.config["SESSION_PERMANENT"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 
 login_manager = LoginManager(app)
-login_manager.login_view = None  # API-driven; no redirect
+login_manager.login_view = None        # API-driven; no redirect
+login_manager.session_protection = "basic"
 
 
 class AppUser(UserMixin):
@@ -232,6 +235,7 @@ def auth_register():
         return jsonify({"status": "error", "message": "Username already taken"}), 409
 
     app_user = AppUser(user["id"], user["username"], "admin")
+    session.permanent = True
     login_user(app_user, remember=True)
     return jsonify({"status": "ok", "username": user["username"], "role": "admin"})
 
@@ -250,7 +254,8 @@ def auth_login():
         return jsonify({"status": "error", "message": "Invalid username or password"}), 401
 
     app_user = AppUser(user["id"], user["username"], user.get("role", "user"))
-    login_user(app_user, remember=body.get("remember", False))
+    session.permanent = True
+    login_user(app_user, remember=body.get("remember", True))
     return jsonify({"status": "ok", "username": user["username"], "role": user.get("role", "user")})
 
 
@@ -975,4 +980,4 @@ if __name__ == "__main__":
     os.makedirs("output",   exist_ok=True)
     os.makedirs("data",     exist_ok=True)
     print(f"\n  EOL Agent API v3.0  ->  http://localhost:{PORT}\n")
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

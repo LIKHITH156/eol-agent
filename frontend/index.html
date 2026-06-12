@@ -1478,9 +1478,13 @@ function _connectSSE() {
     }
   };
 
-  _sseSource.onerror = function() {
+  _sseSource.onerror = async function() {
     _sseSource.close(); _sseSource = null;
-    // Fallback to polling if SSE fails
+    // Check auth before falling back to polling — SSE errors include 401 responses
+    try {
+      const r = await fetch(API + '/api/auth/me', {credentials: 'same-origin'});
+      if (r.status === 401) { window.location.href = '/login'; return; }
+    } catch (_) { /* network error — still try polling */ }
     if (!_scanInterval) _scanInterval = setInterval(_pollScan, 1500);
   };
 }
@@ -1520,6 +1524,7 @@ function _onScanDone(s) {
 
 async function _pollScan() {
   const s = await apiFetch('/api/analyse/status');
+  if (!s) return;  // apiFetch returns null on 401 (already redirected)
   _updateProgress(s);
   if (s.done || !s.running) {
     clearInterval(_scanInterval); _scanInterval = null;
