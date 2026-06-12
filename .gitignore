@@ -19,6 +19,7 @@ env/
 
 # Generated data & reports
 data/eol_cache.db
+data/users.db
 data/*.db-wal
 data/*.db-shm
 output/*.xlsx

@@ -10,16 +10,25 @@ import threading
 from datetime import datetime, timedelta, date
 from typing import Optional
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "eol_cache.db"))
-_lock = threading.Lock()
+_DATA_DIR  = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data"))
+DB_PATH    = os.path.join(_DATA_DIR, "eol_cache.db")
+USERS_DB_PATH = os.path.join(_DATA_DIR, "users.db")
+
+_lock       = threading.Lock()
+_users_lock = threading.Lock()
 
 
 def _connect():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
+def _users_connect():
+    return sqlite3.connect(USERS_DB_PATH, check_same_thread=False)
+
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(_DATA_DIR, exist_ok=True)
+
+    # EOL cache + scan history
     with _lock, _connect() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -43,6 +52,17 @@ def init_db():
                 safe_json    TEXT
             )
         """)
+        for stmt in ["ALTER TABLE scan_history ADD COLUMN run_by TEXT DEFAULT ''"]:
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
+        conn.commit()
+
+    # Users — separate file so EOL cache resets cannot wipe accounts
+    with _users_lock, _users_connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,11 +74,7 @@ def init_db():
                 active        INTEGER DEFAULT 1
             )
         """)
-        # Migrations
-        for stmt in [
-            "ALTER TABLE scan_history ADD COLUMN run_by TEXT DEFAULT ''",
-            "ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1",
-        ]:
+        for stmt in ["ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1"]:
             try:
                 conn.execute(stmt)
             except Exception:
@@ -205,7 +221,7 @@ def create_user(username: str, password: str, email: str = "", role: str = "user
     pw_hash = generate_password_hash(password)
     uname   = username.lower().strip()
     try:
-        with _lock, _connect() as conn:
+        with _users_lock, _users_connect() as conn:
             conn.execute(
                 """INSERT INTO users (username, password_hash, email, role, created_at)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -227,7 +243,7 @@ def _row_to_user(row) -> dict:
 
 
 def get_user_by_username(username: str) -> Optional[dict]:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         row = conn.execute(
             "SELECT id, username, password_hash, email, role, created_at, active FROM users WHERE username = ?",
             (username.lower().strip(),),
@@ -236,7 +252,7 @@ def get_user_by_username(username: str) -> Optional[dict]:
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         row = conn.execute(
             "SELECT id, username, password_hash, email, role, created_at, active FROM users WHERE id = ?",
             (user_id,),
@@ -256,12 +272,12 @@ def verify_user_password(username: str, password: str) -> Optional[dict]:
 
 
 def get_user_count() -> int:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
 def list_users() -> list:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         rows = conn.execute(
             "SELECT id, username, password_hash, email, role, created_at, active FROM users ORDER BY id"
         ).fetchall()
@@ -273,21 +289,21 @@ def list_users() -> list:
 
 
 def delete_user(user_id: int) -> bool:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         return cursor.rowcount > 0
 
 
 def set_user_role(user_id: int, role: str) -> bool:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         cursor = conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
         conn.commit()
         return cursor.rowcount > 0
 
 
 def set_user_active(user_id: int, active: bool) -> bool:
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         cursor = conn.execute("UPDATE users SET active = ? WHERE id = ?",
                               (1 if active else 0, user_id))
         conn.commit()
@@ -297,7 +313,7 @@ def set_user_active(user_id: int, active: bool) -> bool:
 def admin_reset_user_password(user_id: int, new_password: str) -> bool:
     from werkzeug.security import generate_password_hash
     pw_hash = generate_password_hash(new_password)
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         cursor = conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                               (pw_hash, user_id))
         conn.commit()
@@ -307,7 +323,7 @@ def admin_reset_user_password(user_id: int, new_password: str) -> bool:
 def update_user_password(username: str, new_password: str) -> bool:
     from werkzeug.security import generate_password_hash
     pw_hash = generate_password_hash(new_password)
-    with _lock, _connect() as conn:
+    with _users_lock, _users_connect() as conn:
         cursor = conn.execute(
             "UPDATE users SET password_hash = ? WHERE username = ?",
             (pw_hash, username.lower().strip()),

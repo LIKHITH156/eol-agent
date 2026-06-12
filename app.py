@@ -138,12 +138,13 @@ def _restore_last_scan():
 _restore_last_scan()
 
 # ── Startup: show DB location and user count ─────────────────── #
-from core.cache import DB_PATH as _DB_PATH
+from core.cache import DB_PATH as _DB_PATH, USERS_DB_PATH as _USERS_DB_PATH
 _user_count = get_user_count()
-print(f"[Startup] Database : {_DB_PATH}")
-print(f"[Startup] Users    : {_user_count} registered account(s)")
+print(f"[Startup] EOL cache : {_DB_PATH}")
+print(f"[Startup] Users DB  : {_USERS_DB_PATH}")
+print(f"[Startup] Users     : {_user_count} registered account(s)")
 if _user_count == 0:
-    print("[Startup] WARNING  : No users found — first-time setup will be shown")
+    print("[Startup] WARNING   : No users found — first-time setup will be shown")
 
 # ── Pre-configure from env if present ────────────────────────── #
 if os.environ.get("SNOW_URL"):
@@ -850,6 +851,8 @@ def run_analysis():
         finally:
             with _state_lock:
                 _state["scan_running"] = False
+                if not _state["scan_done"]:
+                    _state["scan_done"] = True
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"status": "started", "total": len(devices)})
@@ -862,21 +865,13 @@ def run_analysis():
 def stream_analysis():
     """Server-Sent Events endpoint — replaces polling."""
     def generate():
-        # If scan already finished, send one event and close
-        if not _state["scan_running"] and _state["scan_done"]:
-            payload = _current_status_payload(include_results=True)
-            yield f"data: {json.dumps(payload)}\n\n"
-            return
-
-        # Stream updates until done
-        while _state["scan_running"] or not _state["scan_done"]:
+        # Stream progress while scan is running; always send one final event on exit
+        while _state["scan_running"]:
             payload = _current_status_payload(include_results=False)
             yield f"data: {json.dumps(payload)}\n\n"
             time.sleep(0.7)
-            if _state["scan_done"]:
-                break
 
-        # Final event with full results
+        # Final event with full results (covers both success and error paths)
         payload = _current_status_payload(include_results=True)
         yield f"data: {json.dumps(payload)}\n\n"
 
